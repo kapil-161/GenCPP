@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cmd /c build.bat:*)",
+      "Bash(cmd /c \"C:/Qt/Tools/CMake_64/bin/cmake.exe\":*)",
+      "Bash(PATH=\"/c/Qt/Tools/mingw1310_64/bin:$PATH\" \"/c/Qt/Tools/CMake_64/bin/cmake.exe\" --build:*)",
+      "Bash(start:*)",
+      "Bash(PATH=\"/c/Qt/Tools/mingw1310_64/bin:/c/Qt/6.9.1/mingw_64/bin:$PATH\" ./GeneticsEditor.exe:*)",
+      "Bash(echo:*)",
+      "Bash(PATH=\"/c/Qt/Tools/mingw1310_64/bin:/c/Qt/6.9.1/mingw_64/bin:$PATH\" \"/c/Qt/6.9.1/mingw_64/bin/windeployqt.exe\":*)",
+      "Bash(tasklist:*)",
+      "Bash(PATH=\"/c/Qt/6.9.1/mingw_64/bin:/c/Qt/Tools/mingw1310_64/bin:$PATH\" timeout 5 ./GeneticsEditor.exe:*)",
+      "Bash(ls:*)",
+      "Bash(powershell -Command \"Start-Process ''C:\\\\DSSAT48\\\\Tools\\\\GeneticsCPP\\\\build_win\\\\bin\\\\GeneticsEditor.exe'' -WorkingDirectory ''C:\\\\DSSAT48\\\\Tools\\\\GeneticsCPP\\\\build_win\\\\bin'' -Wait\")",
+      "Bash(cmd /c:*)",
+      "Bash(powershell -Command \"Get-EventLog -LogName Application -Source ''Application Error'' -Newest 5 | Select-Object TimeGenerated,Message | Format-List\")",
+      "Bash(PATH=\"/c/Qt/Tools/mingw1310_64/bin:$PATH\" \"/c/Qt/6.9.1/mingw_64/bin/windeployqt.exe\":*)"
+    ]
+  }
+}

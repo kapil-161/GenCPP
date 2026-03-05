@@ -11,7 +11,7 @@ public:
     static QString createBackup(const QString &filePath);
 
     // Remove oldest backup files, keeping only maxKeep.
-    static void pruneBackups(const QString &filePath, int maxKeep = 10);
+    static void pruneBackups(const QString &filePath, int maxKeep = 1);
 };
 
 #endif // BACKUPMANAGER_H

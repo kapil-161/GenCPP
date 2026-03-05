@@ -4,6 +4,7 @@
 #include <QString>
 #include <QStringList>
 #include <QVector>
+#include <optional>
 
 // Names of the 16 ECO numeric parameters (in order)
 static const QStringList ECO_PARAM_NAMES = {
@@ -12,11 +13,11 @@ static const QStringList ECO_PARAM_NAMES = {
 };
 
 struct EcoRow {
-    QString ecoNum;           // 6 chars   (positions 0-5)
-    QString ecoName;          // 16 chars  (positions 7-22)
-    QString mg;               // 2 chars
-    QString tm;               // 2 chars
-    QVector<double> params;   // 16 values
+    QString ecoNum;                              // 6 chars   (positions 0-5)
+    QString ecoName;                             // 16 chars  (positions 7-22)
+    QString mg;                                  // 2 chars
+    QString tm;                                  // 2 chars
+    QVector<std::optional<double>> params;       // 16 values (std::nullopt = no value, 0 = value is 0)
     bool isMinMax = false;
 };
 

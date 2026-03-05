@@ -4,6 +4,7 @@
 #include <QAbstractTableModel>
 #include <QVector>
 #include <QMap>
+#include <optional>
 #include "EcoParser.h"
 
 class EcoTableModel : public QAbstractTableModel
@@ -28,7 +29,9 @@ public:
     bool setData(const QModelIndex &index, const QVariant &value,
                  int role = Qt::EditRole) override;
 
-    void addRow();
+    void addRow(const QString &ecoName = "NEW ECOTYPE");
+    void addRowWithData(const QString &ecoName, const QString &mg, const QString &tm);
+    void addRowWithFullData(const QString &ecoName, const QString &mg, const QString &tm, const QVector<std::optional<double>> &params);
     void duplicateRow(int row);
     void deleteRow(int row);
 
@@ -47,6 +50,7 @@ signals:
     void dataModified();
 
 private:
+    QString generateUniqueEcoNum() const;
     QVector<EcoRow> m_rows;
     QMap<QString, int> m_refCounts;
     QMap<QString, QString> m_tips;

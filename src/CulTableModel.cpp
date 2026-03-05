@@ -17,8 +17,8 @@ void CulTableModel::setRows(const QVector<CulRow> &rows)
     m_minParams.clear();
     m_maxParams.clear();
     for (const auto &r : rows) {
-        if (r.varNum == "999991") m_minParams = r.params.toList().toVector();
-        if (r.varNum == "999992") m_maxParams = r.params.toList().toVector();
+        if (r.varNum == "999991") m_minParams = r.params;
+        if (r.varNum == "999992") m_maxParams = r.params;
     }
 
     endResetModel();
@@ -26,8 +26,8 @@ void CulTableModel::setRows(const QVector<CulRow> &rows)
 
 void CulTableModel::setMinMaxRows(const CulRow *minRow, const CulRow *maxRow)
 {
-    m_minParams = minRow ? minRow->params.toList().toVector() : QVector<double>();
-    m_maxParams = maxRow ? maxRow->params.toList().toVector() : QVector<double>();
+    m_minParams = minRow ? minRow->params : QVector<std::optional<double>>();
+    m_maxParams = maxRow ? maxRow->params : QVector<std::optional<double>>();
 }
 
 int CulTableModel::rowCount(const QModelIndex &) const { return m_rows.size(); }
@@ -51,9 +51,11 @@ QString CulTableModel::columnName(int col)
 bool CulTableModel::isOutOfRange(int paramIdx, double value) const
 {
     if (m_minParams.size() > paramIdx && m_maxParams.size() > paramIdx) {
-        double lo = m_minParams[paramIdx];
-        double hi = m_maxParams[paramIdx];
-        if (hi > lo) return (value < lo || value > hi);
+        if (m_minParams[paramIdx].has_value() && m_maxParams[paramIdx].has_value()) {
+            double lo = m_minParams[paramIdx].value();
+            double hi = m_maxParams[paramIdx].value();
+            if (hi > lo) return (value < lo || value > hi);
+        }
     }
     return false;
 }
@@ -66,7 +68,7 @@ QVariant CulTableModel::data(const QModelIndex &index, int role) const
     const CulRow &row = m_rows[index.row()];
     int col = index.column();
 
-    if (role == Qt::DisplayRole || role == Qt::EditRole) {
+    if (role == Qt::DisplayRole) {
         switch (col) {
         case COL_VARNUM: return row.varNum;
         case COL_VRNAME: return row.vrName;
@@ -74,8 +76,29 @@ QVariant CulTableModel::data(const QModelIndex &index, int role) const
         case COL_ECONUM: return row.ecoNum;
         default: {
             int p = col - COL_PARAM0;
-            if (p >= 0 && p < row.params.size())
-                return row.params[p];
+            if (p >= 0 && p < row.params.size()) {
+                // Show empty if no value (std::nullopt), show value if set (including 0)
+                if (row.params[p].has_value())
+                    return row.params[p].value();
+                return QString();
+            }
+        }
+        }
+    }
+    
+    if (role == Qt::EditRole) {
+        switch (col) {
+        case COL_VARNUM: return row.varNum;
+        case COL_VRNAME: return row.vrName;
+        case COL_EXPNO:  return row.expNo;
+        case COL_ECONUM: return row.ecoNum;
+        default: {
+            int p = col - COL_PARAM0;
+            if (p >= 0 && p < row.params.size()) {
+                if (row.params[p].has_value())
+                    return row.params[p].value();
+                return 0.0;
+            }
         }
         }
     }
@@ -85,7 +108,7 @@ QVariant CulTableModel::data(const QModelIndex &index, int role) const
             return QBrush(Config::MINMAX_COLOR);
         if (col >= COL_PARAM0) {
             int p = col - COL_PARAM0;
-            if (p < row.params.size() && isOutOfRange(p, row.params[p]))
+            if (p < row.params.size() && row.params[p].has_value() && isOutOfRange(p, row.params[p].value()))
                 return QBrush(Config::OOR_COLOR);
         }
         return QVariant();
@@ -104,11 +127,11 @@ QVariant CulTableModel::data(const QModelIndex &index, int role) const
         // Add min/max range info if out of range
         if (col >= COL_PARAM0) {
             int p = col - COL_PARAM0;
-            if (p < row.params.size() && isOutOfRange(p, row.params[p])) {
-                double lo = (p < m_minParams.size()) ? m_minParams[p] : 0.0;
-                double hi = (p < m_maxParams.size()) ? m_maxParams[p] : 0.0;
+            if (p < row.params.size() && row.params[p].has_value() && isOutOfRange(p, row.params[p].value())) {
+                double lo = (p < m_minParams.size() && m_minParams[p].has_value()) ? m_minParams[p].value() : 0.0;
+                double hi = (p < m_maxParams.size() && m_maxParams[p].has_value()) ? m_maxParams[p].value() : 0.0;
                 tip += QString("\n\n⚠️ OUT OF RANGE");
-                tip += QString("\nValue: %1").arg(row.params[p]);
+                tip += QString("\nValue: %1").arg(row.params[p].value());
                 tip += QString("\nAllowed: %1 to %2").arg(lo).arg(hi);
             }
         }
@@ -189,10 +212,15 @@ bool CulTableModel::setData(const QModelIndex &index, const QVariant &value, int
     default: {
         int p = col - COL_PARAM0;
         if (p >= 0 && p < row.params.size()) {
-            bool ok;
-            double v = value.toDouble(&ok);
-            if (!ok) return false;
-            row.params[p] = v;
+            QString str = value.toString().trimmed();
+            if (str.isEmpty()) {
+                row.params[p] = std::nullopt;  // Empty = no value
+            } else {
+                bool ok;
+                double v = str.toDouble(&ok);
+                if (!ok) return false;
+                row.params[p] = std::optional<double>(v);
+            }
         } else return false;
     }
     }
@@ -202,20 +230,84 @@ bool CulTableModel::setData(const QModelIndex &index, const QVariant &value, int
     return true;
 }
 
-void CulTableModel::addRow()
+void CulTableModel::addRow(const QString &vrName)
 {
     int n = m_rows.size();
     beginInsertRows(QModelIndex(), n, n);
     CulRow r;
-    r.varNum  = "NEW001";
-    r.vrName  = "NEW CULTIVAR";
+    r.varNum  = generateUniqueVarNum();
+    r.vrName  = vrName;
     r.expNo   = " ";
     r.ecoNum  = "DFAULT";
-    r.params  = QVector<double>(18, 0.0);
+    r.params  = QVector<std::optional<double>>(18);  // Initialize with nullopt
     r.isMinMax = false;
     m_rows.append(r);
     endInsertRows();
     emit dataModified();
+}
+
+void CulTableModel::addRowWithData(const QString &vrName, const QString &expNo, const QString &ecoNum)
+{
+    int n = m_rows.size();
+    beginInsertRows(QModelIndex(), n, n);
+    CulRow r;
+    r.varNum  = generateUniqueVarNum();
+    r.vrName  = vrName;
+    r.expNo   = expNo;
+    r.ecoNum  = ecoNum;
+    r.params  = QVector<std::optional<double>>(18);  // Initialize with nullopt
+    r.isMinMax = false;
+    m_rows.append(r);
+    endInsertRows();
+    emit dataModified();
+}
+
+void CulTableModel::addRowWithFullData(const QString &vrName, const QString &expNo, const QString &ecoNum, const QVector<std::optional<double>> &params)
+{
+    int n = m_rows.size();
+    beginInsertRows(QModelIndex(), n, n);
+    CulRow r;
+    r.varNum  = generateUniqueVarNum();
+    r.vrName  = vrName;
+    r.expNo   = expNo;
+    r.ecoNum  = ecoNum;
+    
+    // Copy optional values directly
+    r.params = QVector<std::optional<double>>(18);
+    for (int i = 0; i < params.size() && i < 18; ++i) {
+        r.params[i] = params[i];
+    }
+    
+    r.isMinMax = false;
+    m_rows.append(r);
+    endInsertRows();
+    emit dataModified();
+}
+
+QString CulTableModel::generateUniqueVarNum() const
+{
+    // Find the most recent crop code (first 2 chars) and highest number for that code
+    QString cropCode = "NEW";  // Default fallback
+    int maxNum = 0;
+    
+    for (const auto &row : m_rows) {
+        if (row.varNum.length() >= 6) {
+            QString code = row.varNum.left(2);
+            bool ok;
+            int num = row.varNum.right(4).toInt(&ok);
+            if (ok) {
+                // Use the last non-MINMAX code we find, and track the highest number
+                if (!row.isMinMax && code != "99") {
+                    cropCode = code;
+                    if (num > maxNum)
+                        maxNum = num;
+                }
+            }
+        }
+    }
+    
+    // Format as [CROP_CODE] + 4-digit zero-padded number
+    return QString("%1%2").arg(cropCode).arg(maxNum + 1, 4, 10, QChar('0'));
 }
 
 void CulTableModel::duplicateRow(int row)
@@ -260,14 +352,14 @@ QVector<CulTableModel::Violation> CulTableModel::getViolations() const
         if (row.isMinMax) continue;  // Skip MINIMA/MAXIMA rows
 
         for (int p = 0; p < row.params.size() && p < CUL_PARAM_NAMES.size(); ++p) {
-            if (isOutOfRange(p, row.params[p])) {
+            if (row.params[p].has_value() && isOutOfRange(p, row.params[p].value())) {
                 Violation v;
                 v.row       = r;
                 v.varNum    = row.varNum;
                 v.paramName = CUL_PARAM_NAMES[p];
-                v.value     = row.params[p];
-                v.minVal    = (p < m_minParams.size()) ? m_minParams[p] : 0.0;
-                v.maxVal    = (p < m_maxParams.size()) ? m_maxParams[p] : 0.0;
+                v.value     = row.params[p].has_value() ? row.params[p].value() : 0.0;
+                v.minVal    = (p < m_minParams.size() && m_minParams[p].has_value()) ? m_minParams[p].value() : 0.0;
+                v.maxVal    = (p < m_maxParams.size() && m_maxParams[p].has_value()) ? m_maxParams[p].value() : 0.0;
                 violations.append(v);
             }
         }

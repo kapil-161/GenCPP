@@ -13,9 +13,12 @@
 #include <QGridLayout>
 #include <QFileDialog>
 #include <QMessageBox>
+#include <QDialog>
+#include <QLabel>
 #include <QCloseEvent>
 #include <QHeaderView>
 #include <QFileInfo>
+#include <optional>
 #include <QDir>
 #include <QFile>
 #include <QTextStream>
@@ -527,7 +530,79 @@ void MainWindow::buildSpeNavigator()
 // ─── CUL actions ─────────────────────────────────────────────────────────────
 void MainWindow::onCulAdd()
 {
-    m_culModel->addRow();
+    bool ok;
+    
+    // Ask for VRNAME
+    QString vrName = QInputDialog::getText(this, "New Cultivar",
+        "Enter cultivar name (VRNAME):", QLineEdit::Normal,
+        "NEW CULTIVAR", &ok);
+    if (!ok || vrName.isEmpty()) return;
+    
+    // Ask for EXPNO
+    QString expNo = QInputDialog::getText(this, "New Cultivar",
+        "Enter experiment number (EXPNO):", QLineEdit::Normal,
+        " ", &ok);
+    if (!ok) return;
+    
+    // Ask for ECO#
+    QString ecoNum = QInputDialog::getText(this, "New Cultivar",
+        "Enter ecotype code (ECO#):", QLineEdit::Normal,
+        "DFAULT", &ok);
+    if (!ok || ecoNum.isEmpty()) return;
+    
+    // Ask for each numeric parameter with skip button
+    QVector<std::optional<double>> params(18);
+    
+    for (int i = 0; i < CUL_PARAM_NAMES.size(); ++i) {
+        QDialog dialog(this);
+        dialog.setWindowTitle("New Cultivar Parameters");
+        
+        QVBoxLayout *layout = new QVBoxLayout(&dialog);
+        
+        QLabel *label = new QLabel("Enter " + CUL_PARAM_NAMES[i] + ":");
+        layout->addWidget(label);
+        
+        QLineEdit *lineEdit = new QLineEdit();
+        lineEdit->setText("0");
+        lineEdit->selectAll();
+        layout->addWidget(lineEdit);
+        
+        QHBoxLayout *buttonLayout = new QHBoxLayout();
+        QPushButton *addBtn = new QPushButton("Add");
+        QPushButton *skipBtn = new QPushButton("Skip");
+        buttonLayout->addWidget(addBtn);
+        buttonLayout->addWidget(skipBtn);
+        layout->addLayout(buttonLayout);
+        
+        bool accepted = false;
+        connect(addBtn, &QPushButton::clicked, [&]() {
+            params[i] = lineEdit->text().toDouble();
+            accepted = true;
+            dialog.accept();
+        });
+        
+        connect(skipBtn, &QPushButton::clicked, [&]() {
+            // Leave remaining as nullopt (no value)
+            dialog.reject();
+        });
+        
+        int result = dialog.exec();
+        if (result == QDialog::Rejected) {
+            // Skip was clicked - remaining params stay as nullopt
+            break;
+        }
+    }
+    
+    // Create row with all user-provided values
+    int newRow = m_culModel->rowCount();
+    m_culModel->addRowWithFullData(vrName, expNo, ecoNum, params);
+    m_culDirty = true;
+    
+    // Focus on the new row
+    QModelIndex newIdx = m_culProxy->mapFromSource(
+        m_culModel->index(newRow, CulTableModel::COL_VARNUM));
+    if (newIdx.isValid())
+        m_culView->setCurrentIndex(newIdx);
 }
 
 void MainWindow::onCulDelete()
@@ -621,8 +696,10 @@ void MainWindow::onCulPasteGlue()
         src->setData(idx(CulTableModel::COL_VRNAME), newRow.vrName);
         src->setData(idx(CulTableModel::COL_EXPNO),  newRow.expNo);
         src->setData(idx(CulTableModel::COL_ECONUM), newRow.ecoNum);
-        for (int p = 0; p < newRow.params.size(); ++p)
-            src->setData(idx(CulTableModel::COL_PARAM0 + p), newRow.params[p]);
+        for (int p = 0; p < newRow.params.size(); ++p) {
+            QVariant val = newRow.params[p].has_value() ? QVariant(newRow.params[p].value()) : QVariant();
+            src->setData(idx(CulTableModel::COL_PARAM0 + p), val);
+        }
 
         // Scroll the view to the updated row
         QModelIndex proxyIdx = m_culProxy->mapFromSource(m_culModel->index(existingRow, 0));
@@ -641,8 +718,10 @@ void MainWindow::onCulPasteGlue()
         src->setData(idx(CulTableModel::COL_VRNAME), newRow.vrName);
         src->setData(idx(CulTableModel::COL_EXPNO),  newRow.expNo);
         src->setData(idx(CulTableModel::COL_ECONUM), newRow.ecoNum);
-        for (int p = 0; p < newRow.params.size(); ++p)
-            src->setData(idx(CulTableModel::COL_PARAM0 + p), newRow.params[p]);
+        for (int p = 0; p < newRow.params.size(); ++p) {
+            QVariant val = newRow.params[p].has_value() ? QVariant(newRow.params[p].value()) : QVariant();
+            src->setData(idx(CulTableModel::COL_PARAM0 + p), val);
+        }
 
         QModelIndex proxyIdx = m_culProxy->mapFromSource(m_culModel->index(newIdx, 0));
         m_culView->scrollTo(proxyIdx);
@@ -673,8 +752,12 @@ void MainWindow::onCulExportCsv()
     for (const auto &row : rows) {
         QStringList vals;
         vals << row.varNum << row.vrName << row.expNo << row.ecoNum;
-        for (double v : row.params)
-            vals << QString::number(v);
+        for (const auto &opt : row.params) {
+            if (opt.has_value())
+                vals << QString::number(opt.value());
+            else
+                vals << "";
+        }
         out << vals.join(",") << "\n";
     }
     setStatus("Exported: " + path);
@@ -743,9 +826,11 @@ void MainWindow::onCulValidate()
 
         for (int i = 0; i < row.params.size(); ++i) {
             // Basic NaN/Inf check
-            double v = row.params[i];
-            if (!std::isfinite(v))
-                issues << row.varNum + ": param " + CUL_PARAM_NAMES[i] + " is not finite";
+            if (row.params[i].has_value()) {
+                double v = row.params[i].value();
+                if (!std::isfinite(v))
+                    issues << row.varNum + ": param " + CUL_PARAM_NAMES[i] + " is not finite";
+            }
         }
     }
 
@@ -766,7 +851,82 @@ void MainWindow::onCulSearch(const QString &text)
 }
 
 // ─── ECO actions ─────────────────────────────────────────────────────────────
-void MainWindow::onEcoAdd()  { m_ecoModel->addRow(); m_ecoDirty = true; }
+void MainWindow::onEcoAdd()  
+{ 
+    bool ok;
+    
+    // Ask for ECONAME
+    QString ecoName = QInputDialog::getText(this, "New Ecotype",
+        "Enter ecotype name (ECONAME):", QLineEdit::Normal,
+        "NEW ECOTYPE", &ok);
+    if (!ok || ecoName.isEmpty()) return;
+    
+    // Ask for MG
+    QString mg = QInputDialog::getText(this, "New Ecotype",
+        "Enter maturity group (MG):", QLineEdit::Normal,
+        " 0", &ok);
+    if (!ok) return;
+    
+    // Ask for TM
+    QString tm = QInputDialog::getText(this, "New Ecotype",
+        "Enter temperature modifier (TM):", QLineEdit::Normal,
+        " 0", &ok);
+    if (!ok) return;
+    
+    // Ask for each numeric parameter with skip button
+    QVector<std::optional<double>> params(16);
+    
+    for (int i = 0; i < ECO_PARAM_NAMES.size(); ++i) {
+        QDialog dialog(this);
+        dialog.setWindowTitle("New Ecotype Parameters");
+        
+        QVBoxLayout *layout = new QVBoxLayout(&dialog);
+        
+        QLabel *label = new QLabel("Enter " + ECO_PARAM_NAMES[i] + ":");
+        layout->addWidget(label);
+        
+        QLineEdit *lineEdit = new QLineEdit();
+        lineEdit->setText("0");
+        lineEdit->selectAll();
+        layout->addWidget(lineEdit);
+        
+        QHBoxLayout *buttonLayout = new QHBoxLayout();
+        QPushButton *addBtn = new QPushButton("Add");
+        QPushButton *skipBtn = new QPushButton("Skip");
+        buttonLayout->addWidget(addBtn);
+        buttonLayout->addWidget(skipBtn);
+        layout->addLayout(buttonLayout);
+        
+        bool accepted = false;
+        connect(addBtn, &QPushButton::clicked, [&]() {
+            params[i] = lineEdit->text().toDouble();
+            accepted = true;
+            dialog.accept();
+        });
+        
+        connect(skipBtn, &QPushButton::clicked, [&]() {
+            // Leave remaining as nullopt (no value)
+            dialog.reject();
+        });
+        
+        int result = dialog.exec();
+        if (result == QDialog::Rejected) {
+            // Skip was clicked - remaining params stay as nullopt
+            break;
+        }
+    }
+    
+    // Create row with all user-provided values
+    int newRow = m_ecoModel->rowCount();
+    m_ecoModel->addRowWithFullData(ecoName, mg, tm, params);
+    m_ecoDirty = true;
+    
+    // Focus on the new row
+    QModelIndex newIdx = m_ecoProxy->mapFromSource(
+        m_ecoModel->index(newRow, EcoTableModel::COL_ECONUM));
+    if (newIdx.isValid())
+        m_ecoView->setCurrentIndex(newIdx);
+}
 
 void MainWindow::onEcoDelete()
 {

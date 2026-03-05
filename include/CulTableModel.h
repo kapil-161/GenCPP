@@ -4,6 +4,7 @@
 #include <QAbstractTableModel>
 #include <QVector>
 #include <QStringList>
+#include <optional>
 #include "CulParser.h"
 
 class CulTableModel : public QAbstractTableModel
@@ -31,7 +32,9 @@ public:
                  int role = Qt::EditRole) override;
 
     // Mutation helpers
-    void addRow();
+    void addRow(const QString &vrName = "NEW CULTIVAR");
+    void addRowWithData(const QString &vrName, const QString &expNo, const QString &ecoNum);
+    void addRowWithFullData(const QString &vrName, const QString &expNo, const QString &ecoNum, const QVector<std::optional<double>> &params);
     void duplicateRow(int row);
     void deleteRow(int row);
 
@@ -68,9 +71,10 @@ signals:
 
 private:
     bool isOutOfRange(int paramIdx, double value) const;
+    QString generateUniqueVarNum() const;
     QVector<CulRow> m_rows;
-    QVector<double> m_minParams;
-    QVector<double> m_maxParams;
+    QVector<std::optional<double>> m_minParams;
+    QVector<std::optional<double>> m_maxParams;
     QMap<QString, QString> m_tips;
     QMap<QString, QString> m_calibTypes;  // paramName -> "P" | "G" | "N"
 };

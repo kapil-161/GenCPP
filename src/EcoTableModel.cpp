@@ -42,7 +42,7 @@ QVariant EcoTableModel::data(const QModelIndex &index, int role) const
     const EcoRow &row = m_rows[index.row()];
     int col = index.column();
 
-    if (role == Qt::DisplayRole || role == Qt::EditRole) {
+    if (role == Qt::DisplayRole) {
         switch (col) {
         case COL_ECONUM:  return row.ecoNum;
         case COL_ECONAME: return row.ecoName;
@@ -51,8 +51,30 @@ QVariant EcoTableModel::data(const QModelIndex &index, int role) const
         case COL_REFS:    return m_refCounts.value(row.ecoNum, 0);
         default: {
             int p = col - COL_PARAM0;
-            if (p >= 0 && p < row.params.size())
-                return row.params[p];
+            if (p >= 0 && p < row.params.size()) {
+                // Show empty if no value (std::nullopt), show value if set (including 0)
+                if (row.params[p].has_value())
+                    return row.params[p].value();
+                return QString();
+            }
+        }
+        }
+    }
+    
+    if (role == Qt::EditRole) {
+        switch (col) {
+        case COL_ECONUM:  return row.ecoNum;
+        case COL_ECONAME: return row.ecoName;
+        case COL_MG:      return row.mg;
+        case COL_TM:      return row.tm;
+        case COL_REFS:    return m_refCounts.value(row.ecoNum, 0);
+        default: {
+            int p = col - COL_PARAM0;
+            if (p >= 0 && p < row.params.size()) {
+                if (row.params[p].has_value())
+                    return row.params[p].value();
+                return 0.0;
+            }
         }
         }
     }
@@ -113,10 +135,15 @@ bool EcoTableModel::setData(const QModelIndex &index, const QVariant &value, int
     default: {
         int p = col - COL_PARAM0;
         if (p >= 0 && p < row.params.size()) {
-            bool ok;
-            double v = value.toDouble(&ok);
-            if (!ok) return false;
-            row.params[p] = v;
+            QString str = value.toString().trimmed();
+            if (str.isEmpty()) {
+                row.params[p] = std::nullopt;  // Empty = no value
+            } else {
+                bool ok;
+                double v = str.toDouble(&ok);
+                if (!ok) return false;
+                row.params[p] = std::optional<double>(v);
+            }
         } else return false;
     }
     }
@@ -126,20 +153,81 @@ bool EcoTableModel::setData(const QModelIndex &index, const QVariant &value, int
     return true;
 }
 
-void EcoTableModel::addRow()
+void EcoTableModel::addRow(const QString &ecoName)
 {
     int n = m_rows.size();
     beginInsertRows(QModelIndex(), n, n);
     EcoRow r;
-    r.ecoNum  = "NEWE01";
-    r.ecoName = "NEW ECOTYPE";
+    r.ecoNum  = generateUniqueEcoNum();
+    r.ecoName = ecoName;
     r.mg      = " 0";
     r.tm      = " 0";
-    r.params  = QVector<double>(16, 0.0);
+    r.params  = QVector<std::optional<double>>(16);  // Initialize with nullopt
     r.isMinMax = false;
     m_rows.append(r);
     endInsertRows();
     emit dataModified();
+}
+
+void EcoTableModel::addRowWithData(const QString &ecoName, const QString &mg, const QString &tm)
+{
+    int n = m_rows.size();
+    beginInsertRows(QModelIndex(), n, n);
+    EcoRow r;
+    r.ecoNum  = generateUniqueEcoNum();
+    r.ecoName = ecoName;
+    r.mg      = mg;
+    r.tm      = tm;
+    r.params  = QVector<std::optional<double>>(16);  // Initialize with nullopt
+    r.isMinMax = false;
+    m_rows.append(r);
+    endInsertRows();
+    emit dataModified();
+}
+
+void EcoTableModel::addRowWithFullData(const QString &ecoName, const QString &mg, const QString &tm, const QVector<std::optional<double>> &params)
+{
+    int n = m_rows.size();
+    beginInsertRows(QModelIndex(), n, n);
+    EcoRow r;
+    r.ecoNum  = generateUniqueEcoNum();
+    r.ecoName = ecoName;
+    r.mg      = mg;
+    r.tm      = tm;
+    
+    // Copy optional values directly
+    r.params = QVector<std::optional<double>>(16);
+    for (int i = 0; i < params.size() && i < 16; ++i) {
+        r.params[i] = params[i];
+    }
+    
+    r.isMinMax = false;
+    m_rows.append(r);
+    endInsertRows();
+    emit dataModified();
+}
+
+QString EcoTableModel::generateUniqueEcoNum() const
+{
+    // Find the prefix (e.g., "G", "D") and highest number
+    QString prefix = "ECO";  // Default fallback
+    int maxNum = 0;
+    
+    for (const auto &row : m_rows) {
+        if (row.ecoNum.length() >= 5) {
+            QString code = row.ecoNum.left(1);
+            bool ok;
+            int num = row.ecoNum.right(4).toInt(&ok);
+            if (ok && !row.isMinMax) {
+                prefix = code;
+                if (num > maxNum)
+                    maxNum = num;
+            }
+        }
+    }
+    
+    // Format as [PREFIX] + 4-digit zero-padded number
+    return QString("%1%2").arg(prefix).arg(maxNum + 1, 4, 10, QChar('0'));
 }
 
 void EcoTableModel::duplicateRow(int row)

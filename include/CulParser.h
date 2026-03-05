@@ -5,6 +5,7 @@
 #include <QStringList>
 #include <QVector>
 #include <QMap>
+#include <optional>
 
 // Names of the 18 CUL numeric parameters (in order)
 static const QStringList CUL_PARAM_NAMES = {
@@ -14,12 +15,12 @@ static const QStringList CUL_PARAM_NAMES = {
 };
 
 struct CulRow {
-    QString varNum;           // 6 chars   (positions 0-5)
-    QString vrName;           // 13 chars  (positions 7-19)
-    QString expNo;            // 1 char    (position 20); '.' for MINIMA/MAXIMA
-    QString ecoNum;           // 6 chars   (positions 30-35)
-    QVector<double> params;   // 18 values
-    bool isMinMax = false;    // true if varNum == "999991" or "999992"
+    QString varNum;                              // 6 chars   (positions 0-5)
+    QString vrName;                              // 13 chars  (positions 7-19)
+    QString expNo;                               // 1 char    (position 20); '.' for MINIMA/MAXIMA
+    QString ecoNum;                              // 6 chars   (positions 30-35)
+    QVector<std::optional<double>> params;       // 18 values (std::nullopt = no value, 0 = value is 0)
+    bool isMinMax = false;                       // true if varNum == "999991" or "999992"
 };
 
 class CulParser

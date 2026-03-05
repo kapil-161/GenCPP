@@ -70,9 +70,9 @@ QVector<EcoRow> EcoParser::parse(const QString &filePath, QStringList &headerLin
         row.mg = tokens[0];
         row.tm = tokens[1];
         for (int i = 2; i < tokens.size() && row.params.size() < 16; ++i)
-            row.params << tokens[i].toDouble();
+            row.params << std::optional<double>(tokens[i].toDouble());
 
-        while (row.params.size() < 16) row.params << 0.0;
+        while (row.params.size() < 16) row.params << std::nullopt;
 
         row.isMinMax = (row.ecoNum == "999991" || row.ecoNum == "999992");
         rows << row;
@@ -94,7 +94,7 @@ QString EcoParser::formatRow(const EcoRow &row)
     line += ' ';
 
     for (int i = 0; i < 16; ++i) {
-        double v = (i < row.params.size()) ? row.params[i] : 0.0;
+        double v = (i < row.params.size() && row.params[i].has_value()) ? row.params[i].value() : 0.0;
         line += formatParam(v, i);
         if (i < 15) line += ' ';
     }

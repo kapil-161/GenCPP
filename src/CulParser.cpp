@@ -76,34 +76,43 @@ QVector<CulRow> CulParser::parse(const QString &filePath, QStringList &headerLin
 
         CulRow row;
         row.varNum = line.left(6).trimmed();
-        row.vrName = line.mid(7, 13).trimmed();
-
-        // Parse tokens from position 20 onwards
-        QString rest = line.mid(20);
-        QStringList tokens = rest.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
-
-        if (tokens.isEmpty()) continue;
-
-        // Both cases have same structure: either . or EXPNO, then ECO#, then 18 params
-        if (tokens.size() < 2) continue;
-
-        if (tokens[0] == ".") {
-            // MINIMA/MAXIMA row – no EXPNO
-            row.expNo  = ".";
-        } else {
-            // Regular cultivar row with EXPNO
-            row.expNo  = tokens[0];
+        
+        // Extract ECO# from fixed position 30-35 (DSSAT fixed-width format)
+        row.ecoNum = line.mid(30, 6).trimmed();
+        if (row.ecoNum.isEmpty()) continue;  // Invalid row if no ECO#
+        
+        // VRNAME is in positions 7-29, followed by optional EXPNO
+        QString vrAndExp = line.mid(7, 23);  // 23 chars from pos 7-29
+        
+        // Extract EXPNO: look for single digit or "." from right side of vrAndExp
+        // (usually near the end before the ECO# at position 30)
+        QString expNo;
+        for (int i = vrAndExp.length() - 1; i >= 0; --i) {
+            QChar c = vrAndExp[i];
+            if (c == '.') {
+                expNo = ".";
+                vrAndExp = vrAndExp.left(i).trimmed();
+                break;
+            } else if (c.isDigit()) {
+                expNo = c;
+                vrAndExp = vrAndExp.left(i).trimmed();
+                break;
+            }
         }
+        
+        row.vrName = vrAndExp;  // Remaining is the cultivar name
+        row.expNo = expNo.isEmpty() ? " " : expNo;
+        
+        // Parameters start at position 36 onwards
+        QString paramStr = line.mid(36);
+        QStringList tokens = paramStr.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+        
+        // Parse all parameter tokens
+        for (int i = 0; i < tokens.size() && row.params.size() < 18; ++i)
+            row.params << std::optional<double>(tokens[i].toDouble());
 
-        // ecoNum is always tokens[1]
-        row.ecoNum = tokens[1];
-
-        // Parameters always start at tokens[2]
-        for (int i = 2; i < tokens.size() && row.params.size() < 18; ++i)
-            row.params << tokens[i].toDouble();
-
-        // Pad params to 18 if file is short
-        while (row.params.size() < 18) row.params << 0.0;
+        // Pad params to 18 if file is short (use nullopt for missing values)
+        while (row.params.size() < 18) row.params << std::nullopt;
 
         row.isMinMax = (row.varNum == "999991" || row.varNum == "999992");
         rows << row;
@@ -126,7 +135,7 @@ QString CulParser::formatRow(const CulRow &row)
     line += ' ';
 
     for (int i = 0; i < 18; ++i) {
-        double v = (i < row.params.size()) ? row.params[i] : 0.0;
+        double v = (i < row.params.size() && row.params[i].has_value()) ? row.params[i].value() : 0.0;
         line += formatParam(v, i);
         if (i < 17) line += ' ';
     }
@@ -169,30 +178,60 @@ CulRow CulParser::parseLine(const QString &rawLine)
         return row;
 
     row.varNum = line.left(6).trimmed();
-    row.vrName = line.mid(7, 13).trimmed();
-
-    QString rest = line.mid(20);
-    QStringList tokens = rest.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
-
-    if (tokens.isEmpty()) { row.varNum.clear(); return row; }
-    if (tokens.size() < 2) { row.varNum.clear(); return row; }
-
-    if (tokens[0] == ".") {
-        // MINIMA/MAXIMA row – no EXPNO
-        row.expNo  = ".";
+    
+    // Try fixed-width extraction first (for DSSAT format files)
+    row.ecoNum = line.mid(30, 6).trimmed();
+    
+    if (!row.ecoNum.isEmpty()) {
+        // Fixed-width format: ECO# is at position 30-35
+        QString vrAndExp = line.mid(7, 23);
+        
+        // Extract EXPNO from right side
+        QString expNo;
+        for (int i = vrAndExp.length() - 1; i >= 0; --i) {
+            QChar c = vrAndExp[i];
+            if (c == '.') {
+                expNo = ".";
+                vrAndExp = vrAndExp.left(i).trimmed();
+                break;
+            } else if (c.isDigit()) {
+                expNo = c;
+                vrAndExp = vrAndExp.left(i).trimmed();
+                break;
+            }
+        }
+        
+        row.vrName = vrAndExp;
+        row.expNo = expNo.isEmpty() ? " " : expNo;
+        
+        // Parameters from position 36
+        QString paramStr = line.mid(36);
+        QStringList tokens = paramStr.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+        for (int i = 0; i < tokens.size() && row.params.size() < 18; ++i)
+            row.params << std::optional<double>(tokens[i].toDouble());
     } else {
-        // Regular cultivar row with EXPNO
-        row.expNo  = tokens[0];
+        // Fallback: token-based parsing for non-fixed-width formats
+        row.vrName = line.mid(7, 13).trimmed();
+        
+        QString rest = line.mid(20);
+        QStringList tokens = rest.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+        
+        if (tokens.isEmpty()) { row.varNum.clear(); return row; }
+        if (tokens.size() < 2) { row.varNum.clear(); return row; }
+        
+        if (tokens[0] == ".") {
+            row.expNo = ".";
+        } else {
+            row.expNo = tokens[0];
+        }
+        
+        row.ecoNum = tokens[1];
+        
+        for (int i = 2; i < tokens.size() && row.params.size() < 18; ++i)
+            row.params << std::optional<double>(tokens[i].toDouble());
     }
-
-    // ecoNum is always tokens[1]
-    row.ecoNum = tokens[1];
-
-    // Parameters always start at tokens[2]
-    for (int i = 2; i < tokens.size() && row.params.size() < 18; ++i)
-        row.params << tokens[i].toDouble();
-    while (row.params.size() < 18) row.params << 0.0;
-
+    
+    while (row.params.size() < 18) row.params << std::nullopt;
     row.isMinMax = (row.varNum == "999991" || row.varNum == "999992");
     return row;
 }

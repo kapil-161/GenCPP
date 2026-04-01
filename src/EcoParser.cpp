@@ -113,10 +113,10 @@ bool EcoParser::write(const QString &filePath,
     out.setEncoding(QStringConverter::Latin1);
 
     for (const QString &h : headerLines)
-        out << h << "\r\n";
+        out << h << "\n";
 
     for (const EcoRow &row : rows)
-        out << formatRow(row) << "\r\n";
+        out << formatRow(row) << "\n";
 
     return true;
 }

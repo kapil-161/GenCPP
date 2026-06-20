@@ -222,47 +222,77 @@ void GlueWizard::setupRunPage()
 }
 
 // ── Scan experiments ──────────────────────────────────────────────────────────
+// Experiment files end with X (e.g. .WHX .MZX .ALX .SBX).
+// Treatments are in the *TREATMENTS section, identified by a header line
+// starting with @N and containing TNAME. Treatment number is the first token;
+// TNAME is fixed-width at column 9, 25 chars wide.
 void GlueWizard::scanExperiments()
 {
     m_tree->clear();
-    QDirIterator it(m_dssatDir,
-                    QStringList() << "*.ALX" << "*.alx",
-                    QDir::Files,
-                    QDirIterator::Subdirectories);
 
+    // Match all files whose extension ends with X (case-insensitive)
+    QDirIterator it(m_dssatDir, QDir::Files, QDirIterator::Subdirectories);
     while (it.hasNext()) {
         QString filePath = it.next();
+        QString ext = QFileInfo(filePath).suffix();
+        if (ext.isEmpty() || !ext.endsWith('X', Qt::CaseInsensitive))
+            continue;
+
         QFile f(filePath);
         if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) continue;
 
         QTextStream in(&f);
-        QString content = in.readAll();
+        bool inTreatSection = false;
+        bool cultivarFound  = false;
+        QStringList treatments;
+        QStringList allLines;
+
+        while (!in.atEnd()) {
+            allLines << in.readLine();
+        }
         f.close();
 
-        if (!content.contains(m_cultivarId, Qt::CaseInsensitive)) continue;
+        // First pass: check if cultivar ID appears anywhere in the file
+        for (const QString &line : allLines) {
+            if (line.contains(m_cultivarId, Qt::CaseInsensitive)) {
+                cultivarFound = true;
+                break;
+            }
+        }
+        if (!cultivarFound) continue;
 
-        // Parse treatments from @TRNO lines or @T lines
-        QStringList lines = content.split('\n');
-        QStringList treatments;
-        bool inTreatSection = false;
-        for (const QString &line : lines) {
+        // Second pass: parse treatments from *TREATMENTS section
+        for (const QString &line : allLines) {
             QString trimmed = line.trimmed();
-            if (trimmed.startsWith("@T ") || trimmed.startsWith("@TRNO")) {
+            if (trimmed.isEmpty() || trimmed.startsWith('!'))
+                continue;
+
+            // Treatments header: @N ... TNAME ...
+            if (trimmed.startsWith("@N") && trimmed.contains("TNAME", Qt::CaseInsensitive)) {
                 inTreatSection = true;
                 continue;
             }
+
             if (inTreatSection) {
-                if (trimmed.isEmpty() || trimmed.startsWith("@") || trimmed.startsWith("*")) {
+                // New section header ends treatments block
+                if (trimmed.startsWith('@') || trimmed.startsWith('*')) {
                     inTreatSection = false;
                     continue;
                 }
-                // First token is treatment number, rest is name
-                QStringList parts = trimmed.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
-                if (parts.size() >= 2) {
-                    treatments << QString("[%1] %2").arg(parts[0], parts.mid(1).join(" "));
-                } else if (parts.size() == 1) {
-                    treatments << QString("[%1]").arg(parts[0]);
-                }
+                // Treatment number: first token; TNAME: fixed-width col 9, 25 chars
+                QStringList parts = trimmed.split(' ', Qt::SkipEmptyParts);
+                if (parts.isEmpty()) continue;
+                bool ok;
+                parts[0].toInt(&ok);
+                if (!ok) continue;
+
+                QString tname;
+                if (line.length() > 9)
+                    tname = line.mid(9, 25).trimmed();
+                if (tname.isEmpty())
+                    tname = parts.mid(1).join(" ");
+
+                treatments << QString("[%1] %2").arg(parts[0], tname);
             }
         }
 
@@ -282,7 +312,7 @@ void GlueWizard::scanExperiments()
 
     if (m_tree->topLevelItemCount() == 0) {
         QTreeWidgetItem *item = new QTreeWidgetItem(m_tree);
-        item->setText(0, "(No experiments found for this cultivar)");
+        item->setText(0, QString("(No experiments found for cultivar: %1)").arg(m_cultivarId));
         item->setFlags(item->flags() & ~Qt::ItemIsUserCheckable);
         m_goBtn->setEnabled(false);
     }

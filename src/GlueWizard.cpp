@@ -421,12 +421,13 @@ void GlueWizard::scanExperiments()
         if (cultivarNum < 0) continue; // cultivar not in this file
         filesWithCultivar++;
 
-        // ── Step 2: find CU column index from *TREATMENTS header ──────────────
-        // Header: @N R O C TNAME.................... CU FL SA ...
-        // Data:    1 1 0 0 Rex_24C                    1  1  0 ...
+        // ── Step 2: find treatments using character positions from header ────────
+        // Header: @N R O C TNAME.................... CU FL SA IC ...
+        // TNAME is fixed-width (25 chars), CU is immediately after it
+        // Use character position of "CU" in header to read CU value from data lines
         QStringList matchingTreatments;
         bool inTrtSection = false;
-        int cuTrtCol = -1; // token index of CU in treatment data line
+        int cuCharPos  = -1; // character position of "CU" column in header
         int tnameStart = -1; // character position of TNAME in the header line
 
         for (const QString &line : allLines) {
@@ -435,30 +436,28 @@ void GlueWizard::scanExperiments()
 
             if (trimmed.startsWith("*TREATMENT")) {
                 inTrtSection = true;
-                cuTrtCol = -1;
+                cuCharPos = -1;
                 continue;
             }
             if (inTrtSection) {
                 if (trimmed.startsWith('*')) { inTrtSection = false; continue; }
 
                 if (trimmed.startsWith("@N")) {
-                    // Find character position of TNAME and token index of CU
                     tnameStart = line.indexOf("TNAME");
-                    QStringList hdrs = trimmed.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
-                    cuTrtCol = hdrs.indexOf("CU");
+                    cuCharPos  = line.indexOf(" CU ");
+                    if (cuCharPos >= 0) cuCharPos++; // skip the leading space
                     continue;
                 }
                 if (trimmed.startsWith('@')) continue;
-                if (cuTrtCol < 0 || tnameStart < 0) continue;
-
-                QStringList parts = trimmed.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
-                if (parts.size() <= cuTrtCol) continue;
+                if (cuCharPos < 0 || tnameStart < 0) continue;
+                if (line.length() <= cuCharPos) continue;
 
                 bool ok;
-                int trtNum = parts[0].toInt(&ok);
+                int trtNum = line.left(3).trimmed().toInt(&ok);
                 if (!ok) continue;
 
-                int cuVal = parts[cuTrtCol].toInt();
+                // Read CU value from the character position (2 chars wide)
+                int cuVal = line.mid(cuCharPos, 3).trimmed().toInt();
                 if (cuVal != cultivarNum) continue;
 
                 // Extract TNAME by character position (25 chars wide)

@@ -1,4 +1,23 @@
 #include "MainWindow.h"
+#include <QComboBox>
+#include <QListView>
+
+// QComboBox subclass that resizes the popup to a fixed grid after Qt shows it
+class CropComboBox : public QComboBox {
+public:
+    explicit CropComboBox(QWidget *parent = nullptr) : QComboBox(parent) {}
+    void showPopup() override {
+        QComboBox::showPopup();
+        // After Qt positions the popup, resize it to our grid dimensions
+        if (QWidget *popup = this->findChild<QFrame*>()) {
+            popup->setFixedWidth(180 * 4);   // 4 columns x 180px
+            popup->setFixedHeight(26 * 13);  // 13 rows x 26px
+            // Re-center below the combo button
+            QPoint pos = mapToGlobal(QPoint(0, height()));
+            popup->move(pos);
+        }
+    }
+};
 #include "CulParser.h"
 #include "EcoParser.h"
 #include "BackupManager.h"
@@ -178,19 +197,16 @@ void MainWindow::setupUI()
     topGrid->addWidget(m_browseButton, 0, 2);
 
     topGrid->addWidget(new QLabel("Crop:"), 1, 0);
-    m_cropCombo = new QComboBox;
+    m_cropCombo = new CropComboBox;
     m_cropCombo->setMinimumWidth(280);
     {
-        // Multi-column popup: wrap items into columns so all crops fit on screen
         QListView *popupView = new QListView(m_cropCombo);
         popupView->setViewMode(QListView::ListMode);
         popupView->setFlow(QListView::TopToBottom);
         popupView->setWrapping(true);
         popupView->setResizeMode(QListView::Adjust);
         popupView->setUniformItemSizes(true);
-        popupView->setGridSize(QSize(180, 26)); // each cell: 180px wide, 26px tall — fits full names
-        popupView->setMinimumWidth(180 * 4);    // exactly 4 columns
-        popupView->setFixedHeight(26 * 13);     // 13 rows x 26px = all ~50 crops visible
+        popupView->setGridSize(QSize(180, 26));
         popupView->setStyleSheet(
             "QListView { font-size: 13px; padding: 4px; }"
             "QListView::item { padding: 2px 8px; border-radius: 3px; }"

@@ -438,19 +438,23 @@ void GlueWizard::onGoFromTreatments()
 
     QTextStream out(&batchFile);
     // Header line — fixed format GLUE.r expects
+    // chars 1-17: "$BATCH(CULTIVAR):", 18-19: cropCode, 20-25: cultivarId, 26+: " name"
+    // Limit cultivar name to 16 chars (VRNAME field width) to avoid bleed from adjacent fields
+    QString culName = m_cultivarName.trimmed().left(16).trimmed();
     out << QString("$BATCH(CULTIVAR):%1%2 %3\n")
-           .arg(m_cropInfo.cropCode, m_cultivarId, m_cultivarName);
+           .arg(m_cropInfo.cropCode, m_cultivarId, culName);
     out << " \n";
-    // Column header padded to match DSSAT fixed-width format
+    // Column header: "@FILEX" + spaces to col 94 + "TRTNO     RP     SQ     OP     CO"
+    // Total header line length must be 127 chars (matching DSSAT expectation)
     out << QString("@FILEX%1TRTNO     RP     SQ     OP     CO\n")
-           .arg(QString(89, ' '));
+           .arg(QString(88, ' '));
 
     // One data line per selected treatment
+    // File path padded to 93 chars, TRTNO right-aligned in 6, then fixed columns
     for (auto it = selected.begin(); it != selected.end(); ++it) {
         QString filePath = QDir::toNativeSeparators(it.key());
         for (int trtNo : it.value()) {
-            // File path padded to 94 chars, then treatment number right-aligned in 6
-            QString padded = filePath.leftJustified(94, ' ');
+            QString padded = filePath.leftJustified(93, ' ');
             out << QString("%1%2      0      0      0      0\n")
                    .arg(padded).arg(trtNo, 6);
         }

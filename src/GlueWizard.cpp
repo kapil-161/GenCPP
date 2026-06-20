@@ -341,14 +341,27 @@ void GlueWizard::scanExperiments()
 {
     m_tree->clear();
 
+    if (m_cropInfo.expDir.isEmpty()) {
+        QTreeWidgetItem *item = new QTreeWidgetItem(m_tree);
+        item->setText(0, QString("No experiment directory configured for crop %1 (check DSSATPRO.v48)")
+                         .arg(m_cropInfo.cropCode));
+        item->setFlags(item->flags() & ~Qt::ItemIsUserCheckable);
+        m_goBtn->setEnabled(false);
+        return;
+    }
+
     QString xExt = m_cropInfo.cropCode + "X";
     QDirIterator it(m_cropInfo.expDir,
                     QStringList() << "*." + xExt << "*." + xExt.toLower(),
                     QDir::Files,
                     QDirIterator::Subdirectories);
 
+    int filesScanned = 0;
+    int filesWithCultivar = 0;
+
     while (it.hasNext()) {
         QString filePath = it.next();
+        filesScanned++;
 
         QFile f(filePath);
         if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) continue;
@@ -401,6 +414,7 @@ void GlueWizard::scanExperiments()
         }
 
         if (cultivarNum < 0) continue; // cultivar not in this file
+        filesWithCultivar++;
 
         // ── Step 2: find CU column index from *TREATMENTS header ──────────────
         // Header: @N R O C TNAME.................... CU FL SA ...
@@ -469,8 +483,16 @@ void GlueWizard::scanExperiments()
 
     if (m_tree->topLevelItemCount() == 0) {
         QTreeWidgetItem *item = new QTreeWidgetItem(m_tree);
-        item->setText(0, QString("(No experiments found for cultivar %1 in %2)")
-                         .arg(m_cultivarId, m_cropInfo.expDir));
+        QString msg;
+        if (filesScanned == 0)
+            msg = QString("No .%1 files found in: %2").arg(xExt, m_cropInfo.expDir);
+        else if (filesWithCultivar == 0)
+            msg = QString("Scanned %1 .%2 file(s) — cultivar %3 not referenced in any of them.\nDir: %4")
+                      .arg(filesScanned).arg(xExt).arg(m_cultivarId).arg(m_cropInfo.expDir);
+        else
+            msg = QString("Scanned %1 file(s), %2 reference cultivar %3 but have no matching treatments.")
+                      .arg(filesScanned).arg(filesWithCultivar).arg(m_cultivarId);
+        item->setText(0, msg);
         item->setFlags(item->flags() & ~Qt::ItemIsUserCheckable);
         m_goBtn->setEnabled(false);
     }

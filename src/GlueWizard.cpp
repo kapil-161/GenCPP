@@ -399,31 +399,71 @@ void GlueWizard::onUnselectAll()
 // ── Slot: Go from treatments → backup ────────────────────────────────────────
 void GlueWizard::onGoFromTreatments()
 {
-    m_selectedFiles = selectedTreatmentFiles();
-    if (m_selectedFiles.isEmpty()) {
+    // Collect selected treatments: filePath -> list of treatment numbers
+    QMap<QString, QList<int>> selected;
+    for (int i = 0; i < m_tree->topLevelItemCount(); ++i) {
+        QTreeWidgetItem *expItem = m_tree->topLevelItem(i);
+        QString filePath = expItem->text(0);
+        for (int j = 0; j < expItem->childCount(); ++j) {
+            QTreeWidgetItem *trtItem = expItem->child(j);
+            if (trtItem->checkState(0) != Qt::Checked) continue;
+            // Text format: "[1] TreatmentName" — extract number
+            QString txt = trtItem->text(0);
+            int from = txt.indexOf('[') + 1;
+            int to   = txt.indexOf(']');
+            if (from > 0 && to > from)
+                selected[filePath] << txt.mid(from, to - from).toInt();
+        }
+    }
+
+    if (selected.isEmpty()) {
         QMessageBox::warning(this, "No selection",
                              "Please select at least one treatment.");
         return;
     }
+
+    // Generate batch file: $BATCH(CULTIVAR):cropCode + cultivarId + " " + cultivarName
+    // GLUE.r reads: chars 18-19 = cropCode, chars 20-25 = cultivarId
+    // Format: "$BATCH(CULTIVAR):" (17 chars) + cropCode(2) + cultivarId(6) + " " + cultivarName
+    QString batchFileName = QString("%1.%2C").arg(m_cultivarId, m_cropInfo.cropCode);
+    QString batchPath = GLUE_WORK + "/" + batchFileName;
+
+    QDir().mkpath(GLUE_WORK);
+    QFile batchFile(batchPath);
+    if (!batchFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QMessageBox::critical(this, "Error",
+                              "Cannot write batch file:\n" + batchPath);
+        return;
+    }
+
+    QTextStream out(&batchFile);
+    // Header line — fixed format GLUE.r expects
+    out << QString("$BATCH(CULTIVAR):%1%2 %3\n")
+           .arg(m_cropInfo.cropCode, m_cultivarId, m_cultivarName);
+    out << " \n";
+    // Column header padded to match DSSAT fixed-width format
+    out << QString("@FILEX%1TRTNO     RP     SQ     OP     CO\n")
+           .arg(QString(89, ' '));
+
+    // One data line per selected treatment
+    for (auto it = selected.begin(); it != selected.end(); ++it) {
+        QString filePath = QDir::toNativeSeparators(it.key());
+        for (int trtNo : it.value()) {
+            // File path padded to 94 chars, then treatment number right-aligned in 6
+            QString padded = filePath.leftJustified(94, ' ');
+            out << QString("%1%2      0      0      0      0\n")
+                   .arg(padded).arg(trtNo, 6);
+        }
+    }
+    batchFile.close();
+
+    m_selectedFiles = selected.keys();
     m_stack->setCurrentIndex(1);
 }
 
 QStringList GlueWizard::selectedTreatmentFiles()
 {
-    QStringList files;
-    for (int i = 0; i < m_tree->topLevelItemCount(); ++i) {
-        QTreeWidgetItem *parent = m_tree->topLevelItem(i);
-        bool anyChild = false;
-        for (int j = 0; j < parent->childCount(); ++j) {
-            if (parent->child(j)->checkState(0) == Qt::Checked) {
-                anyChild = true;
-                break;
-            }
-        }
-        if (anyChild || parent->checkState(0) == Qt::Checked)
-            files << parent->text(0);
-    }
-    return files;
+    return m_selectedFiles;
 }
 
 // ── Slot: Back ────────────────────────────────────────────────────────────────

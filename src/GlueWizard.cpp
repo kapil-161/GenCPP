@@ -2,6 +2,7 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGridLayout>
+#include <QFormLayout>
 #include <QGroupBox>
 #include <QFileDialog>
 #include <QMessageBox>
@@ -54,7 +55,8 @@ GlueWizard::GlueWizard(const CropInfo &cropInfo,
 {
     setWindowTitle(QString("Run GLUE — %1 / %2 %3")
                    .arg(cropInfo.cropCode, cultivarId, cultivarName));
-    setMinimumSize(620, 480);
+    setMinimumSize(620, 360);
+    resize(700, 400);
 
     m_stack = new QStackedWidget(this);
     QVBoxLayout *main = new QVBoxLayout(this);
@@ -181,47 +183,56 @@ void GlueWizard::setupBackupPage()
 void GlueWizard::setupRunPage()
 {
     QWidget *page = new QWidget;
-    QHBoxLayout *hbox = new QHBoxLayout(page);
+    QVBoxLayout *outer = new QVBoxLayout(page);
+    outer->setContentsMargins(8, 8, 8, 8);
+    outer->setSpacing(6);
 
-    // Left: GLUE Parameters
+    QHBoxLayout *hbox = new QHBoxLayout;
+    hbox->setSpacing(8);
+
+    // ── Left: GLUE Parameters ────────────────────────────────────────────────
     QGroupBox *paramBox = new QGroupBox("GLUE Parameters");
-    QGridLayout *grid = new QGridLayout(paramBox);
+    paramBox->setFixedWidth(200);
+    QFormLayout *form = new QFormLayout(paramBox);
+    form->setRowWrapPolicy(QFormLayout::WrapAllRows);
 
-    grid->addWidget(new QLabel("Runs:"), 0, 0);
     m_runsSpin = new QSpinBox;
     m_runsSpin->setRange(100, 1000000);
     m_runsSpin->setValue(100);
     m_runsSpin->setSingleStep(1000);
-    grid->addWidget(m_runsSpin, 0, 1);
+    m_runsSpin->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    form->addRow("Runs:", m_runsSpin);
 
-    grid->addWidget(new QLabel("Mode:"), 1, 0);
     m_modeCombo = new QComboBox;
     m_modeCombo->addItem("Both (Phenology + Growth)", 1);
     m_modeCombo->addItem("Phenology Only",            2);
     m_modeCombo->addItem("Growth Parameters",         3);
-    m_modeCombo->setCurrentIndex(0);
-    grid->addWidget(m_modeCombo, 1, 1);
+    m_modeCombo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    form->addRow("Mode:", m_modeCombo);
 
-    grid->addWidget(new QLabel("Include ECO file:"), 2, 0);
     m_ecoCheck = new QCheckBox;
-    grid->addWidget(m_ecoCheck, 2, 1);
+    form->addRow("Include ECO file:", m_ecoCheck);
 
     hbox->addWidget(paramBox);
 
-    // Center: action buttons + log
+    // ── Center: buttons + progress + log ────────────────────────────────────
     QVBoxLayout *centerCol = new QVBoxLayout;
-    m_runGlueBtn  = new QPushButton("Run GLUE");
-    m_stopGlueBtn = new QPushButton("Stop GLUE");
+    centerCol->setSpacing(4);
+
+    m_runGlueBtn   = new QPushButton("Run GLUE");
+    m_stopGlueBtn  = new QPushButton("Stop GLUE");
     m_startOverBtn = new QPushButton("Start Over");
     m_stopGlueBtn->setEnabled(false);
-
     m_runGlueBtn->setStyleSheet("font-weight:bold; background:#2196F3; color:white;");
+
     centerCol->addWidget(m_runGlueBtn);
     centerCol->addWidget(m_stopGlueBtn);
     centerCol->addWidget(m_startOverBtn);
+    centerCol->addSpacing(6);
 
     m_progressLabel = new QLabel("Ready");
     m_progressLabel->setAlignment(Qt::AlignCenter);
+    m_progressLabel->setWordWrap(true);
     centerCol->addWidget(m_progressLabel);
 
     m_progressBar = new QProgressBar;
@@ -240,32 +251,35 @@ void GlueWizard::setupRunPage()
     m_logEdit->setReadOnly(true);
     m_logEdit->setFont(QFont("Courier New", 8));
     m_logEdit->setVisible(false);
+    m_logEdit->setMinimumHeight(150);
     centerCol->addWidget(m_logEdit, 1);
 
     connect(showLogBtn, &QPushButton::toggled, this, [this, showLogBtn](bool checked) {
         m_logEdit->setVisible(checked);
         showLogBtn->setText(checked ? "Hide Log" : "Show Log");
-        // Resize dialog to fit
-        if (checked)
-            resize(width(), qMax(height(), 600));
-        else
-            resize(width(), 420);
+        adjustSize();
     });
 
     hbox->addLayout(centerCol, 1);
 
-    // Right: outputs
+    // ── Right: outputs ───────────────────────────────────────────────────────
     QGroupBox *outBox = new QGroupBox("GLUE Outputs");
+    outBox->setFixedWidth(160);
     QVBoxLayout *outCol = new QVBoxLayout(outBox);
-    m_outCoeffBtn = new QPushButton("Cultivar Coefficients");
+    outCol->setSpacing(4);
+    m_outCoeffBtn = new QPushButton("Cultivar\nCoefficients");
     m_outDevBtn   = new QPushButton("Development");
     m_outYieldBtn = new QPushButton("Growth and Yield");
+    m_outCoeffBtn->setWordWrap(true);
     for (auto *b : {m_outCoeffBtn, m_outDevBtn, m_outYieldBtn}) {
         b->setEnabled(false);
+        b->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         outCol->addWidget(b);
     }
     outCol->addStretch();
     hbox->addWidget(outBox);
+
+    outer->addLayout(hbox, 1);
 
     connect(m_runGlueBtn,  &QPushButton::clicked, this, &GlueWizard::onRunGlue);
     connect(m_stopGlueBtn, &QPushButton::clicked, this, &GlueWizard::onStopGlue);

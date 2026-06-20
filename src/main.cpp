@@ -1,4 +1,3 @@
-#include <QApplication>
 #include <QStyleFactory>
 #include <QIcon>
 #include <QDir>
@@ -11,10 +10,16 @@
 
 #include "MainWindow.h"
 #include "Config.h"
+#include "SingleInstanceApp.h"
 
 int main(int argc, char *argv[])
 {
-    QApplication app(argc, argv);
+    SingleInstanceApp app(argc, argv);
+
+    if (!app.isFirstInstance()) {
+        app.showAlreadyRunningMessage();
+        return 0;
+    }
 
     QCoreApplication::setApplicationName(Config::APP_NAME);
     QCoreApplication::setApplicationVersion(Config::APP_VERSION);

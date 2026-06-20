@@ -43,16 +43,16 @@ public:
     static const int COL_VRNAME  = 1;
     static const int COL_EXPNO   = 2;
     static const int COL_ECONUM  = 3;
-    static const int COL_PARAM0  = 4;   // CSDL is column 4
+    static const int COL_PARAM0  = 4;   // Parameters start at column 4
 
-    // Total columns = 4 fixed + 18 params
-    static const int TOTAL_COLS  = 22;
+    // Set dynamic parameter names from the parsed CUL file
+    void setParamNames(const QStringList &names);
 
     // Column name for a given section index
-    static QString columnName(int col);
+    QString columnName(int col) const;
 
     void setColumnTooltips(const QMap<QString, QString> &tips) { m_tips = tips; }
-    void setCalibrationTypes(const QMap<QString, QString> &types) { m_calibTypes = types; emit headerDataChanged(Qt::Horizontal, COL_PARAM0, TOTAL_COLS - 1); }
+    void setCalibrationTypes(const QMap<QString, QString> &types);
 
     // Validation: returns a list of violations (e.g., "CAND01: PPSEN=0.5 (range: -0.2 to -0.04)")
     struct Violation {
@@ -75,6 +75,7 @@ private:
     QVector<CulRow> m_rows;
     QVector<std::optional<double>> m_minParams;
     QVector<std::optional<double>> m_maxParams;
+    QStringList m_paramNames;
     QMap<QString, QString> m_tips;
     QMap<QString, QString> m_calibTypes;  // paramName -> "P" | "G" | "N"
 };

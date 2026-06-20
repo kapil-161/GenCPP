@@ -25,6 +25,7 @@
 #include "EcoParser.h"
 #include "CulTableModel.h"
 #include "EcoTableModel.h"
+#include "SpeGraphWidget.h"
 
 class MainWindow : public QMainWindow
 {
@@ -70,6 +71,7 @@ private slots:
     void onSpeSearch();
     void onSpeSectionClicked(const QString &section);
     void onSpeScrolled(int value);
+    void onSpeCursorPositionChanged();
 
     // Auto-save
     void autoSaveAll();
@@ -85,6 +87,7 @@ private:
 
     void loadDssatConfig(const QString &dssatDir);
     void loadCrop(const QString &cropCode);
+    void loadFileType(const QString &fileType);
     void refreshEcoCrossRef();
     void buildSpeNavigator();
     void setStatus(const QString &msg, bool error = false);
@@ -93,6 +96,9 @@ private:
     QLineEdit  *m_dssatDirEdit;
     QPushButton *m_browseButton;
     QComboBox  *m_cropCombo;
+    QPushButton *m_culFileBtn;
+    QPushButton *m_ecoFileBtn;
+    QPushButton *m_speFileBtn;
     QLabel     *m_geneticsLabel;
 
     // Tab widget
@@ -120,6 +126,7 @@ private:
     QListWidget *m_speNavList;
     QLineEdit   *m_speSearchEdit;
     QPushButton *m_speSaveBtn;
+    SpeGraphWidget *m_speGraphWidget;
     bool         m_speDirty = false;
 
     // Auto-save timer

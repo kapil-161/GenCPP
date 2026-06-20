@@ -85,13 +85,14 @@ QString EcoParser::formatRow(const EcoRow &row)
 {
     // "%-6s %-16s%-2s %-2s " + 16 params
     QString line;
-    line += row.ecoNum.leftJustified(6, ' ');
-    line += ' ';
-    line += row.ecoName.leftJustified(16, ' ');
-    line += row.mg.leftJustified(2, ' ');
-    line += ' ';
-    line += row.tm.leftJustified(2, ' ');
-    line += ' ';
+    line += row.ecoNum.leftJustified(6, ' ');   // A6 (0-5)
+    line += ' ';                                // 1X (6)
+    line += row.ecoName.leftJustified(16, ' '); // A16 (7-22)
+    line += ' ';                                // 1X (23)
+    line += row.mg.rightJustified(2, ' ');      // I2 (24-25)
+    line += ' ';                                // 1X (26)
+    line += row.tm.rightJustified(2, ' ');      // I2 (27-28)
+    line += ' ';                                // 1X (29)
 
     for (int i = 0; i < 16; ++i) {
         double v = (i < row.params.size() && row.params[i].has_value()) ? row.params[i].value() : 0.0;

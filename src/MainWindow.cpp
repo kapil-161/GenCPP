@@ -31,7 +31,9 @@
 #include <QAbstractTextDocumentLayout>
 #include <QTimer>
 #include <QDebug>
+#include <algorithm>
 #include <memory>
+#include <QRegularExpression>
 
 // ─── Proxy: pins MINIMA/MAXIMA rows to the top during any sort ───────────────
 class CulSortProxy : public QSortFilterProxyModel {
@@ -180,9 +182,26 @@ void MainWindow::setupUI()
     topGrid->addWidget(m_cropCombo, 1, 1);
     topGrid->setColumnStretch(1, 1);
 
+    topGrid->addWidget(new QLabel("File:"), 2, 0);
+    QHBoxLayout *fileBtnLayout = new QHBoxLayout;
+    fileBtnLayout->setSpacing(6);
+    m_culFileBtn = new QPushButton("CUL");
+    m_ecoFileBtn = new QPushButton("ECO");
+    m_speFileBtn = new QPushButton("SPE");
+    for (auto *b : {m_culFileBtn, m_ecoFileBtn, m_speFileBtn}) {
+        b->setEnabled(false);
+        b->setFixedWidth(60);
+        b->setCheckable(true);
+        fileBtnLayout->addWidget(b);
+    }
+    fileBtnLayout->addStretch();
+    QWidget *fileBtnWidget = new QWidget;
+    fileBtnWidget->setLayout(fileBtnLayout);
+    topGrid->addWidget(fileBtnWidget, 2, 1);
+
     m_geneticsLabel = new QLabel("—");
     m_geneticsLabel->setStyleSheet("color: #555; font-size: 10px;");
-    topGrid->addWidget(m_geneticsLabel, 2, 0, 1, 3);
+    topGrid->addWidget(m_geneticsLabel, 3, 0, 1, 3);
 
     // Replace placeholder
     auto *placeholderItem = vbox->takeAt(0);
@@ -363,7 +382,17 @@ void MainWindow::setupSpeTab(QWidget *tab)
     m_speEdit->setFont(QFont("Courier New", 9));
     m_speEdit->setLineWrapMode(QTextEdit::NoWrap);
     new SpeSyntaxHighlighter(m_speEdit->document());
-    editLayout->addWidget(m_speEdit, 1);
+    
+    QSplitter *editSplitter = new QSplitter(Qt::Vertical);
+    editSplitter->addWidget(m_speEdit);
+    
+    m_speGraphWidget = new SpeGraphWidget;
+    editSplitter->addWidget(m_speGraphWidget);
+    
+    editSplitter->setStretchFactor(0, 3);
+    editSplitter->setStretchFactor(1, 1);
+    
+    editLayout->addWidget(editSplitter, 1);
     hbox->addLayout(editLayout, 1);
 
     // Connect find button
@@ -382,6 +411,9 @@ void MainWindow::connectSignals()
     connect(m_browseButton, &QPushButton::clicked, this, &MainWindow::onOpenDssatDir);
     connect(m_cropCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &MainWindow::onCropChanged);
+    connect(m_culFileBtn, &QPushButton::clicked, this, [this](){ loadFileType("CUL"); });
+    connect(m_ecoFileBtn, &QPushButton::clicked, this, [this](){ loadFileType("ECO"); });
+    connect(m_speFileBtn, &QPushButton::clicked, this, [this](){ loadFileType("SPE"); });
 
     // CUL
     connect(m_culAddBtn,      &QPushButton::clicked, this, &MainWindow::onCulAdd);
@@ -412,6 +444,8 @@ void MainWindow::connectSignals()
             [this](QListWidgetItem *item){ onSpeSectionClicked(item->text()); });
     connect(m_speEdit->verticalScrollBar(), &QScrollBar::valueChanged,
             this, &MainWindow::onSpeScrolled);
+    connect(m_speEdit, &QTextEdit::cursorPositionChanged,
+            this, &MainWindow::onSpeCursorPositionChanged);
 }
 
 // ─── DSSAT config loading ──────────────────────────────────────────────────
@@ -434,20 +468,31 @@ void MainWindow::loadDssatConfig(const QString &dssatDir)
 #endif
     m_cdeData = DetailCdeParser::parse(cdePath);
 
-    // Populate crop combo
+    // Populate crop combo — sorted by description, crop name first
     m_cropCombo->blockSignals(true);
     m_cropCombo->clear();
+
+    QList<QPair<QString, QString>> entries; // display, key
     for (auto it = m_crops.begin(); it != m_crops.end(); ++it) {
         const CropInfo &info = it.value();
-        QString display = QString("%1 (%2) — %3")
-                              .arg(info.cropCode, it.key(), info.description);
-        m_cropCombo->addItem(display, it.key());
+        QString desc = info.description;
+        int dash = desc.indexOf('-');
+        if (dash >= 0) desc = desc.mid(dash + 1).trimmed();
+        QString display = desc;
+        entries.append({display, it.key()});
     }
+    std::sort(entries.begin(), entries.end(),
+              [](const QPair<QString,QString> &a, const QPair<QString,QString> &b){
+                  return a.first.compare(b.first, Qt::CaseInsensitive) < 0;
+              });
+    for (const auto &e : entries)
+        m_cropCombo->addItem(e.first, e.second);
+
     m_cropCombo->blockSignals(false);
 
     if (m_cropCombo->count() > 0) {
         m_cropCombo->setCurrentIndex(0);
-        onCropChanged(0);  // explicitly load the first crop (signal was blocked during fill)
+        onCropChanged(0);
     } else {
         setStatus("No crops found in " + proPath, true);
     }
@@ -470,42 +515,77 @@ void MainWindow::loadCrop(const QString &cropCode)
     m_currentEcoPath  = info.ecoFile;
     m_currentSpePath  = info.speFile;
 
+    // Enable buttons only for files that exist on disk
+    m_culFileBtn->setEnabled(QFileInfo::exists(info.culFile));
+    m_ecoFileBtn->setEnabled(QFileInfo::exists(info.ecoFile));
+    m_speFileBtn->setEnabled(QFileInfo::exists(info.speFile));
+
+    m_culFileBtn->setChecked(false);
+    m_ecoFileBtn->setChecked(false);
+    m_speFileBtn->setChecked(false);
+
     m_geneticsLabel->setText(
-        QString("CUL: %1   ECO: %2   SPE: %3")
-            .arg(QFileInfo(info.culFile).fileName(),
-                 QFileInfo(info.ecoFile).fileName(),
-                 QFileInfo(info.speFile).fileName())
+        QString("File: —")
     );
 
-    // Load CUL
-    m_culHeaderLines.clear();
-    QVector<CulRow> culRows = CulParser::parse(m_currentCulPath, m_culHeaderLines);
-    m_culModel->setRows(culRows);
-    m_culModel->setColumnTooltips(CulParser::tooltipsFromHeader(m_culHeaderLines));
-    m_culModel->setCalibrationTypes(CulParser::calibrationTypes(m_culHeaderLines));
-    m_culDirty = false;
+    setStatus(QString("Selected crop: %1 (%2) — choose CUL, ECO or SPE").arg(info.cropCode, cropCode));
 
-    // Load ECO
-    m_ecoHeaderLines.clear();
-    QVector<EcoRow> ecoRows = EcoParser::parse(m_currentEcoPath, m_ecoHeaderLines);
-    m_ecoModel->setRows(ecoRows);
-    m_ecoModel->setColumnTooltips(CulParser::tooltipsFromHeader(m_ecoHeaderLines));
-    m_ecoDirty = false;
+    // Auto-load CUL if available
+    if (m_culFileBtn->isEnabled())
+        loadFileType("CUL");
+    else if (m_ecoFileBtn->isEnabled())
+        loadFileType("ECO");
+    else if (m_speFileBtn->isEnabled())
+        loadFileType("SPE");
+}
 
-    refreshEcoCrossRef();
+void MainWindow::loadFileType(const QString &fileType)
+{
+    if (m_currentCropCode.isEmpty() || !m_crops.contains(m_currentCropCode)) return;
+    const CropInfo &info = m_crops[m_currentCropCode];
 
-    // Load SPE
-    QString speText = SpeEditor::load(m_currentSpePath);
-    m_speEdit->blockSignals(true);
-    m_speEdit->setPlainText(speText);
-    m_speEdit->blockSignals(false);
-    m_speDirty = false;
-    buildSpeNavigator();
+    // Highlight the active button
+    m_culFileBtn->setChecked(fileType == "CUL");
+    m_ecoFileBtn->setChecked(fileType == "ECO");
+    m_speFileBtn->setChecked(fileType == "SPE");
 
-    setStatus(QString("Loaded %1 (%2) — %3 cultivars, %4 ecotypes")
-              .arg(info.cropCode, cropCode)
-              .arg(culRows.size())
-              .arg(ecoRows.size()));
+    if (fileType == "CUL") {
+        m_culHeaderLines.clear();
+        QVector<CulRow> culRows = CulParser::parse(m_currentCulPath, m_culHeaderLines);
+        QStringList paramNames = CulParser::extractParamNames(m_culHeaderLines);
+        m_culModel->setParamNames(paramNames.isEmpty() ? CUL_PARAM_NAMES : paramNames);
+        m_culModel->setRows(culRows);
+        m_culModel->setColumnTooltips(CulParser::tooltipsFromHeader(m_culHeaderLines));
+        m_culModel->setCalibrationTypes(CulParser::calibrationTypes(m_culHeaderLines));
+        m_culDirty = false;
+        m_tabWidget->setCurrentIndex(0);
+        setStatus(QString("Loaded CUL: %1 — %2 cultivars").arg(QFileInfo(m_currentCulPath).fileName()).arg(culRows.size()));
+    } else if (fileType == "ECO") {
+        m_ecoHeaderLines.clear();
+        QVector<EcoRow> ecoRows = EcoParser::parse(m_currentEcoPath, m_ecoHeaderLines);
+        m_ecoModel->setRows(ecoRows);
+        m_ecoModel->setColumnTooltips(CulParser::tooltipsFromHeader(m_ecoHeaderLines));
+        m_ecoDirty = false;
+        refreshEcoCrossRef();
+        m_tabWidget->setCurrentIndex(1);
+        setStatus(QString("Loaded ECO: %1 — %2 ecotypes").arg(QFileInfo(m_currentEcoPath).fileName()).arg(ecoRows.size()));
+    } else if (fileType == "SPE") {
+        QString speText = SpeEditor::load(m_currentSpePath);
+        m_speEdit->blockSignals(true);
+        m_speEdit->setPlainText(speText);
+        m_speEdit->blockSignals(false);
+        m_speDirty = false;
+        buildSpeNavigator();
+        m_tabWidget->setCurrentIndex(2);
+        setStatus(QString("Loaded SPE: %1").arg(QFileInfo(m_currentSpePath).fileName()));
+    }
+
+    m_geneticsLabel->setText(
+        QString("File: %1").arg(
+            fileType == "CUL" ? QFileInfo(info.culFile).fileName() :
+            fileType == "ECO" ? QFileInfo(info.ecoFile).fileName() :
+                                QFileInfo(info.speFile).fileName())
+    );
 }
 
 void MainWindow::refreshEcoCrossRef()
@@ -551,15 +631,17 @@ void MainWindow::onCulAdd()
     if (!ok || ecoNum.isEmpty()) return;
     
     // Ask for each numeric parameter with skip button
-    QVector<std::optional<double>> params(18);
+    int numParams = m_culModel->columnCount() - CulTableModel::COL_PARAM0;
+    QVector<std::optional<double>> params(numParams);
     
-    for (int i = 0; i < CUL_PARAM_NAMES.size(); ++i) {
+    for (int i = 0; i < numParams; ++i) {
         QDialog dialog(this);
         dialog.setWindowTitle("New Cultivar Parameters");
         
         QVBoxLayout *layout = new QVBoxLayout(&dialog);
         
-        QLabel *label = new QLabel("Enter " + CUL_PARAM_NAMES[i] + ":");
+        QString paramName = m_culModel->columnName(CulTableModel::COL_PARAM0 + i);
+        QLabel *label = new QLabel("Enter " + paramName + ":");
         layout->addWidget(label);
         
         QLineEdit *lineEdit = new QLineEdit();
@@ -632,7 +714,13 @@ void MainWindow::onCulSave()
     BackupManager::createBackup(m_currentCulPath);
     BackupManager::pruneBackups(m_currentCulPath);
 
-    if (CulParser::write(m_currentCulPath, m_culModel->rows(), m_culHeaderLines)) {
+    QStringList paramNames;
+    int numParams = m_culModel->columnCount() - CulTableModel::COL_PARAM0;
+    for (int i = 0; i < numParams; ++i) {
+        paramNames << m_culModel->columnName(CulTableModel::COL_PARAM0 + i);
+    }
+
+    if (CulParser::write(m_currentCulPath, m_culModel->rows(), m_culHeaderLines, paramNames)) {
         m_culDirty = false;
         setStatus("CUL saved: " + m_currentCulPath);
     } else {
@@ -645,7 +733,9 @@ void MainWindow::onCulCopyRow()
     QModelIndex idx = m_culProxy->mapToSource(m_culView->currentIndex());
     if (!idx.isValid()) return;
     const CulRow &row = m_culModel->rows().at(idx.row());
-    QApplication::clipboard()->setText(CulParser::formatRow(row));
+    int numParams = m_culModel->columnCount() - CulTableModel::COL_PARAM0;
+    QVector<ParamFormat> fmts = CulParser::inferFormats(m_culModel->rows(), numParams);
+    QApplication::clipboard()->setText(CulParser::formatRow(row, fmts, numParams));
     setStatus(QString("Copied cultivar %1 to clipboard").arg(row.varNum));
 }
 
@@ -789,9 +879,15 @@ void MainWindow::onCulImportCsv()
         row.vrName = parts[1].left(13).trimmed();
         row.expNo  = parts[2].left(1).trimmed();
         row.ecoNum = parts[3].left(6).trimmed();
-        for (int i = 4; i < parts.size() && row.params.size() < 18; ++i)
+        int numParams = m_culModel->columnCount() - CulTableModel::COL_PARAM0;
+        for (int i = 4; i < parts.size() && row.params.size() < numParams; ++i) {
             row.params << parts[i].toDouble();
-        while (row.params.size() < 18) row.params << 0.0;
+            row.paramStrs << parts[i].trimmed();
+        }
+        while (row.params.size() < numParams) {
+            row.params << 0.0;
+            row.paramStrs << "";
+        }
 
         // Check if varNum already exists -> overwrite, else add
         m_culModel->addRow();
@@ -1073,6 +1169,68 @@ void MainWindow::onSpeScrolled(int /*value*/)
     m_speNavList->blockSignals(true);
     m_speNavList->clearSelection();
     m_speNavList->blockSignals(false);
+}
+
+void MainWindow::onSpeCursorPositionChanged()
+{
+    QTextCursor cursor = m_speEdit->textCursor();
+    QString line = cursor.block().text().trimmed();
+
+    QStringList parts = line.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+    QVector<double> temps;
+    
+    for (const QString &part : parts) {
+        bool ok;
+        double val = part.toDouble(&ok);
+        if (ok) {
+            temps.append(val);
+        } else {
+            break;
+        }
+    }
+    
+    if (temps.size() >= 3 && temps.size() <= 10) {
+        SpeGraphData data;
+        
+        QString paramName = "Parameter Curve";
+        if (parts.size() > temps.size()) {
+            paramName = parts.last();
+        }
+        
+        data.title = QString("Graph: %1").arg(paramName);
+        // Note: Using a pure generic label since some params are non-temp
+        data.xAxisLabel = "Parameter Value";
+        data.yAxisLabel = "Relative Effect Y";
+        
+        if (temps.size() == 4) {
+             data.points.append(QPointF(temps[0], 0.0));
+             data.points.append(QPointF(temps[1], 1.0));
+             data.points.append(QPointF(temps[2], 1.0));
+             data.points.append(QPointF(temps[3], 0.0));
+        } else {
+             QTextBlock nextBlock = cursor.block().next();
+             if (nextBlock.isValid()) {
+                 QString nextLine = nextBlock.text().trimmed();
+                 QStringList nextParts = nextLine.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+                 QVector<double> yVals;
+                 for (const QString &p : nextParts) {
+                     bool ok; double y = p.toDouble(&ok);
+                     if (ok) yVals.append(y); else break;
+                 }
+                 if (yVals.size() == temps.size()) {
+                     for (int i=0; i<temps.size(); i++) {
+                         data.points.append(QPointF(temps[i], yVals[i]));
+                     }
+                 } else {
+                     m_speGraphWidget->clearData();
+                     return;
+                 }
+             }
+        }
+        m_speGraphWidget->setData(data);
+    } else {
+        m_speGraphWidget->clearData();
+    }
 }
 
 // ─── Menu actions ─────────────────────────────────────────────────────────────

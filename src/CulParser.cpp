@@ -55,8 +55,14 @@ QVector<ParamFormat> CulParser::inferFormats(const QVector<CulRow> &rows, int nu
             }
         }
         
-        // Width will be 5, plus 1 space prefix = 6 (DSSAT standard data width)
-        formats[p].width = 5;
+        // Determine field width dynamically from rows
+        int fWidth = 6;
+        for (const auto &r : rows) {
+            if (r.fWidth > fWidth) fWidth = r.fWidth;
+        }
+
+        // Width will be fWidth - 1, plus 1 space prefix = fWidth (DSSAT standard data width)
+        formats[p].width = fWidth - 1;
     }
     
     return formats;
@@ -97,13 +103,19 @@ QVector<CulRow> CulParser::parse(const QString &filePath, QStringList &headerLin
     QTextStream in(&file);
     in.setEncoding(QStringConverter::Latin1);
 
+    bool inDataSection = false;
+
     while (!in.atEnd()) {
         QString line = in.readLine();
         // Remove Windows \r if present
         if (line.endsWith('\r')) line.chop(1);
 
         if (line.isEmpty()) {
-            headerLines << line;
+            if (!inDataSection) {
+                headerLines << line;
+            } else if (!rows.isEmpty()) {
+                rows.last().trailingBlank = true;
+            }
             continue;
         }
 
@@ -118,39 +130,26 @@ QVector<CulRow> CulParser::parse(const QString &filePath, QStringList &headerLin
         // Data line: must be long enough
         if (line.length() < 36) continue;
 
+        inDataSection = true;
+
         CulRow row;
         row.varNum = line.left(6).trimmed();
-        
-        // Extract ECO# from fixed position 30-35 (DSSAT fixed-width format)
+        row.vrName = line.mid(7, 16).trimmed();
+
+        // Position 23 to 29 is the 7X region, typically containing the EXPNO at the end
+        QString expStr = line.mid(23, 7).trimmed();
+        row.expNo = expStr.isEmpty() ? "." : expStr.right(1);
+
+        // Extract ECO# from strictly position 30-35 (A6)
         row.ecoNum = line.mid(30, 6).trimmed();
         if (row.ecoNum.isEmpty()) continue;  // Invalid row if no ECO#
-        
-        // VRNAME is in positions 7-29, followed by optional EXPNO
-        QString vrAndExp = line.mid(7, 23);  // 23 chars from pos 7-29
-        
-        // Extract EXPNO: look for single digit or "." from right side of vrAndExp
-        // (usually near the end before the ECO# at position 30)
-        QString expNo;
-        for (int i = vrAndExp.length() - 1; i >= 0; --i) {
-            QChar c = vrAndExp[i];
-            if (c == '.') {
-                expNo = ".";
-                vrAndExp = vrAndExp.left(i).trimmed();
-                break;
-            } else if (c.isDigit()) {
-                expNo = c;
-                vrAndExp = vrAndExp.left(i).trimmed();
-                break;
-            }
-        }
-        
-        row.vrName = vrAndExp;  // Remaining is the cultivar name
-        row.expNo = expNo.isEmpty() ? " " : expNo;
-        
+
         // Parameters start at position 36 onwards
         QString paramStr = line.mid(36);
         QStringList tokens = paramStr.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
-        
+
+        row.fWidth = tokens.size() > 0 ? qMax(6, (int)std::round(paramStr.length() / (double)tokens.size())) : 6;
+
         // Parse all parameter tokens dynamically without hard limit
         for (int i = 0; i < tokens.size(); ++i) {
             row.params << std::optional<double>(tokens[i].toDouble());
@@ -171,10 +170,10 @@ QString CulParser::formatRow(const CulRow &row, const QVector<ParamFormat> &form
     QString line;
     line += row.varNum.leftJustified(6, ' ');
     line += ' ';
-    line += row.vrName.leftJustified(13, ' ');
-    line += row.expNo.rightJustified(1, ' ');
-    line += "       . ";
-    line += row.ecoNum.leftJustified(6, ' ');
+    line += row.vrName.leftJustified(16, ' '); // strict A16
+    line += "      ";                          // first 6 chars of 7X region
+    line += row.expNo.rightJustified(1, ' ');  // last char of 7X region
+    line += row.ecoNum.leftJustified(6, ' ');  // strict A6 starting at index 30
 
     int actualParams = std::max(numParams, static_cast<int>(row.params.size()));
 
@@ -217,9 +216,11 @@ bool CulParser::write(const QString &filePath,
     }
     QVector<ParamFormat> formats = inferFormats(rows, numParams);
 
-    // Write data rows
+    // Write data rows, preserving blank lines that appeared after each row in the source
     for (const CulRow &row : rows) {
         out << formatRow(row, formats, numParams) << "\n";
+        if (row.trailingBlank)
+            out << "\n";
     }
 
     return true;
@@ -238,34 +239,18 @@ CulRow CulParser::parseLine(const QString &rawLine)
 
     row.varNum = line.left(6).trimmed();
     
-    // Try fixed-width extraction first (for DSSAT format files)
+    // Strict A6, 1X, A16, 7X, A6 extraction
     row.ecoNum = line.mid(30, 6).trimmed();
     
     if (!row.ecoNum.isEmpty()) {
-        // Fixed-width format: ECO# is at position 30-35
-        QString vrAndExp = line.mid(7, 23);
-        
-        // Extract EXPNO from right side
-        QString expNo;
-        for (int i = vrAndExp.length() - 1; i >= 0; --i) {
-            QChar c = vrAndExp[i];
-            if (c == '.') {
-                expNo = ".";
-                vrAndExp = vrAndExp.left(i).trimmed();
-                break;
-            } else if (c.isDigit()) {
-                expNo = c;
-                vrAndExp = vrAndExp.left(i).trimmed();
-                break;
-            }
-        }
-        
-        row.vrName = vrAndExp;
-        row.expNo = expNo.isEmpty() ? " " : expNo;
+        row.vrName = line.mid(7, 16).trimmed();
+        QString expStr = line.mid(23, 7).trimmed();
+        row.expNo = expStr.isEmpty() ? "." : expStr.right(1);
         
         // Parameters from position 36
         QString paramStr = line.mid(36);
         QStringList tokens = paramStr.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+        row.fWidth = tokens.size() > 0 ? qMax(6, (int)std::round(paramStr.length() / (double)tokens.size())) : 6;
         for (int i = 0; i < tokens.size(); ++i) {
             row.params << std::optional<double>(tokens[i].toDouble());
             row.paramStrs << tokens[i];

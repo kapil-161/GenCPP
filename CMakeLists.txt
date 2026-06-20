@@ -1,6 +1,43 @@
 cmake_minimum_required(VERSION 3.16)
 project(GeneticsEditor VERSION 1.0.0 LANGUAGES CXX)
 
+# ---------------------------------------------------------------------------
+# Auto-version from git: commit count + short hash  →  1.0.<count>-<hash>
+# ---------------------------------------------------------------------------
+find_package(Git QUIET)
+if(Git_FOUND OR GIT_FOUND)
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} rev-list --count HEAD
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        OUTPUT_VARIABLE GIT_COMMIT_COUNT
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        OUTPUT_VARIABLE GIT_SHORT_HASH
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+endif()
+if(NOT GIT_COMMIT_COUNT OR GIT_COMMIT_COUNT STREQUAL "")
+    set(GIT_COMMIT_COUNT "0")
+endif()
+if(NOT GIT_SHORT_HASH OR GIT_SHORT_HASH STREQUAL "")
+    set(GIT_SHORT_HASH "unknown")
+endif()
+set(GEN2_VERSION "1.0.${GIT_COMMIT_COUNT}")
+set(GEN2_VERSION_FULL "1.0.${GIT_COMMIT_COUNT}-${GIT_SHORT_HASH}")
+message(STATUS "Gen2 version: ${GEN2_VERSION_FULL}")
+
+# Write include/version_generated.h (re-generated every configure)
+configure_file(
+    ${CMAKE_SOURCE_DIR}/include/version_generated.h.in
+    ${CMAKE_SOURCE_DIR}/include/version_generated.h
+    @ONLY
+)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -25,6 +62,7 @@ include_directories(${CMAKE_SOURCE_DIR}/include)
 set(SOURCES
     src/main.cpp
     src/MainWindow.cpp
+    src/SingleInstanceApp.cpp
     src/DssatProParser.cpp
     src/DetailCdeParser.cpp
     src/CulParser.cpp
@@ -34,12 +72,15 @@ set(SOURCES
     src/CulTableModel.cpp
     src/EcoTableModel.cpp
     src/BackupManager.cpp
+    src/SpeGraphWidget.cpp
 )
 
 # Header files
 set(HEADERS
     include/Config.h
     include/MainWindow.h
+    include/SingleInstanceApp.h
+    include/version_generated.h
     include/DssatProParser.h
     include/DetailCdeParser.h
     include/CulParser.h
@@ -49,6 +90,7 @@ set(HEADERS
     include/CulTableModel.h
     include/EcoTableModel.h
     include/BackupManager.h
+    include/SpeGraphWidget.h
 )
 
 # Add version resource for Windows
@@ -127,3 +169,11 @@ elseif(APPLE)
         MACOSX_BUNDLE_SHORT_VERSION_STRING "1.0"
     )
 endif()
+
+add_executable(Tester test_parse.cpp src/CulParser.cpp)
+target_link_libraries(Tester Qt6::Core Qt6::Widgets)
+set_target_properties(Tester PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+
+add_executable(TestFormat test_format.cpp src/CulParser.cpp)
+target_link_libraries(TestFormat Qt6::Core Qt6::Widgets)
+set_target_properties(TestFormat PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)

@@ -4,6 +4,7 @@
 #include <QString>
 #include <QStringList>
 #include <QColor>
+#include "version_generated.h"
 
 // Debug output control
 #ifdef ENABLE_DEBUG_OUTPUT
@@ -18,7 +19,7 @@
 namespace Config {
 
     const QString APP_NAME    = "GeneticsEditor";
-    const QString APP_VERSION = "1.0.0";
+    const QString APP_VERSION = GEN2_VERSION_FULL;
     const QString ORG_NAME    = "DSSAT";
 
 #ifdef Q_OS_WIN

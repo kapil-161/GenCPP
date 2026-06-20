@@ -6,7 +6,22 @@
 
 CulTableModel::CulTableModel(QObject *parent)
     : QAbstractTableModel(parent)
+    , m_paramNames(CUL_PARAM_NAMES)
 {}
+
+void CulTableModel::setParamNames(const QStringList &names)
+{
+    beginResetModel();
+    m_paramNames = names;
+    if (m_paramNames.isEmpty()) m_paramNames = CUL_PARAM_NAMES; // fallback
+    endResetModel();
+}
+
+void CulTableModel::setCalibrationTypes(const QMap<QString, QString> &types)
+{
+    m_calibTypes = types;
+    emit headerDataChanged(Qt::Horizontal, COL_PARAM0, columnCount() - 1);
+}
 
 void CulTableModel::setRows(const QVector<CulRow> &rows)
 {
@@ -31,9 +46,9 @@ void CulTableModel::setMinMaxRows(const CulRow *minRow, const CulRow *maxRow)
 }
 
 int CulTableModel::rowCount(const QModelIndex &) const { return m_rows.size(); }
-int CulTableModel::columnCount(const QModelIndex &) const { return TOTAL_COLS; }
+int CulTableModel::columnCount(const QModelIndex &) const { return COL_PARAM0 + m_paramNames.size(); }
 
-QString CulTableModel::columnName(int col)
+QString CulTableModel::columnName(int col) const
 {
     switch (col) {
     case COL_VARNUM: return "VAR#";
@@ -42,8 +57,8 @@ QString CulTableModel::columnName(int col)
     case COL_ECONUM: return "ECO#";
     default:
         int p = col - COL_PARAM0;
-        if (p >= 0 && p < CUL_PARAM_NAMES.size())
-            return CUL_PARAM_NAMES[p];
+        if (p >= 0 && p < m_paramNames.size())
+            return m_paramNames[p];
     }
     return QString();
 }
@@ -211,15 +226,20 @@ bool CulTableModel::setData(const QModelIndex &index, const QVariant &value, int
     case COL_ECONUM: row.ecoNum = value.toString().left(6); break;
     default: {
         int p = col - COL_PARAM0;
-        if (p >= 0 && p < row.params.size()) {
+        if (p >= 0 && p < m_paramNames.size()) {
+            while (row.params.size() <= p) row.params.append(std::nullopt);
+            while (row.paramStrs.size() <= p) row.paramStrs.append("");
+
             QString str = value.toString().trimmed();
             if (str.isEmpty()) {
                 row.params[p] = std::nullopt;  // Empty = no value
+                row.paramStrs[p] = ""; 
             } else {
                 bool ok;
                 double v = str.toDouble(&ok);
                 if (!ok) return false;
                 row.params[p] = std::optional<double>(v);
+                row.paramStrs[p] = ""; // Clear so it gets dynamically formatted
             }
         } else return false;
     }
@@ -239,7 +259,8 @@ void CulTableModel::addRow(const QString &vrName)
     r.vrName  = vrName;
     r.expNo   = " ";
     r.ecoNum  = "DFAULT";
-    r.params  = QVector<std::optional<double>>(18);  // Initialize with nullopt
+    r.params  = QVector<std::optional<double>>(m_paramNames.size());
+    r.paramStrs = QVector<QString>(m_paramNames.size(), "");
     r.isMinMax = false;
     m_rows.append(r);
     endInsertRows();
@@ -255,7 +276,8 @@ void CulTableModel::addRowWithData(const QString &vrName, const QString &expNo, 
     r.vrName  = vrName;
     r.expNo   = expNo;
     r.ecoNum  = ecoNum;
-    r.params  = QVector<std::optional<double>>(18);  // Initialize with nullopt
+    r.params  = QVector<std::optional<double>>(m_paramNames.size());
+    r.paramStrs = QVector<QString>(m_paramNames.size(), "");
     r.isMinMax = false;
     m_rows.append(r);
     endInsertRows();
@@ -273,8 +295,9 @@ void CulTableModel::addRowWithFullData(const QString &vrName, const QString &exp
     r.ecoNum  = ecoNum;
     
     // Copy optional values directly
-    r.params = QVector<std::optional<double>>(18);
-    for (int i = 0; i < params.size() && i < 18; ++i) {
+    r.params = QVector<std::optional<double>>(m_paramNames.size());
+    r.paramStrs = QVector<QString>(m_paramNames.size(), "");
+    for (int i = 0; i < params.size() && i < m_paramNames.size(); ++i) {
         r.params[i] = params[i];
     }
     
@@ -351,12 +374,12 @@ QVector<CulTableModel::Violation> CulTableModel::getViolations() const
         const CulRow &row = m_rows[r];
         if (row.isMinMax) continue;  // Skip MINIMA/MAXIMA rows
 
-        for (int p = 0; p < row.params.size() && p < CUL_PARAM_NAMES.size(); ++p) {
+        for (int p = 0; p < row.params.size() && p < m_paramNames.size(); ++p) {
             if (row.params[p].has_value() && isOutOfRange(p, row.params[p].value())) {
                 Violation v;
                 v.row       = r;
                 v.varNum    = row.varNum;
-                v.paramName = CUL_PARAM_NAMES[p];
+                v.paramName = m_paramNames[p];
                 v.value     = row.params[p].has_value() ? row.params[p].value() : 0.0;
                 v.minVal    = (p < m_minParams.size() && m_minParams[p].has_value()) ? m_minParams[p].value() : 0.0;
                 v.maxVal    = (p < m_maxParams.size() && m_maxParams[p].has_value()) ? m_maxParams[p].value() : 0.0;

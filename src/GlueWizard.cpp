@@ -101,6 +101,11 @@ void GlueWizard::setupTreatmentPage()
 
     vbox->addLayout(content);
 
+    m_scanStatusLabel = new QLabel;
+    m_scanStatusLabel->setWordWrap(true);
+    m_scanStatusLabel->hide();
+    vbox->addWidget(m_scanStatusLabel);
+
     connect(m_selectAllBtn,   &QPushButton::clicked, this, &GlueWizard::onSelectAll);
     connect(m_unselectAllBtn, &QPushButton::clicked, this, &GlueWizard::onUnselectAll);
     connect(m_goBtn,          &QPushButton::clicked, this, &GlueWizard::onGoFromTreatments);
@@ -481,20 +486,29 @@ void GlueWizard::scanExperiments()
         }
     }
 
+    m_scanStatusLabel->hide();
     if (m_tree->topLevelItemCount() == 0) {
-        QTreeWidgetItem *item = new QTreeWidgetItem(m_tree);
         QString msg;
-        if (filesScanned == 0)
+        QString style;
+        if (filesScanned == 0) {
             msg = QString("No .%1 files found in: %2").arg(xExt, m_cropInfo.expDir);
-        else if (filesWithCultivar == 0)
-            msg = QString("Scanned %1 .%2 file(s) — cultivar %3 not referenced in any of them.\nDir: %4")
-                      .arg(filesScanned).arg(xExt).arg(m_cultivarId).arg(m_cropInfo.expDir);
-        else
-            msg = QString("Scanned %1 file(s), %2 reference cultivar %3 but have no matching treatments.")
+            style = "padding: 4px 8px; background:#F44336; color:white; border-radius:3px;";
+        } else if (filesWithCultivar == 0) {
+            msg = QString("Scanned %1 .%2 file(s) — cultivar %3 not found in any experiment.")
+                      .arg(filesScanned).arg(xExt).arg(m_cultivarId);
+            style = "padding: 4px 8px; background:#FF9800; color:white; border-radius:3px;";
+        } else {
+            msg = QString("Scanned %1 file(s), %2 contain cultivar %3 but have no matching treatments.")
                       .arg(filesScanned).arg(filesWithCultivar).arg(m_cultivarId);
-        item->setText(0, msg);
-        item->setFlags(item->flags() & ~Qt::ItemIsUserCheckable);
+            style = "padding: 4px 8px; background:#FF9800; color:white; border-radius:3px;";
+        }
+        m_scanStatusLabel->setText(msg);
+        m_scanStatusLabel->setStyleSheet(style);
+        m_scanStatusLabel->show();
         m_goBtn->setEnabled(false);
+    } else {
+        m_scanStatusLabel->hide();
+        m_goBtn->setEnabled(true);
     }
 }
 

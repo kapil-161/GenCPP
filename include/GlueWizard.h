@@ -61,6 +61,7 @@ private:
 
     // Page 1 — treatment tree
     QTreeWidget  *m_tree;
+    QLabel       *m_scanStatusLabel;
     QPushButton  *m_selectAllBtn;
     QPushButton  *m_unselectAllBtn;
     QPushButton  *m_goBtn;

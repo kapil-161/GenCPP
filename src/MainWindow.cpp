@@ -188,8 +188,15 @@ void MainWindow::setupUI()
         popupView->setWrapping(true);
         popupView->setResizeMode(QListView::Adjust);
         popupView->setUniformItemSizes(true);
-        popupView->setMinimumWidth(640);  // 4 cols x ~160px (longest name: "Bambara groundnut")
-        popupView->setFixedHeight(10 * 22); // 10 rows x 22px = all crops in 4 columns
+        popupView->setGridSize(QSize(180, 26)); // each cell: 180px wide, 26px tall — fits full names
+        popupView->setMinimumWidth(180 * 4);    // exactly 4 columns
+        popupView->setFixedHeight(26 * 13);     // 13 rows x 26px = all ~50 crops visible
+        popupView->setStyleSheet(
+            "QListView { font-size: 13px; padding: 4px; }"
+            "QListView::item { padding: 2px 8px; border-radius: 3px; }"
+            "QListView::item:hover { background: #E3F2FD; color: #1565C0; }"
+            "QListView::item:selected { background: #1976D2; color: white; font-weight: bold; }"
+        );
         m_cropCombo->setView(popupView);
     }
     topGrid->addWidget(m_cropCombo, 1, 1);

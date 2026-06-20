@@ -122,7 +122,7 @@ QVector<CulRow> CulParser::parse(const QString &filePath, QStringList &headerLin
         QChar first = line[0];
 
         // Skip / preserve header lines
-        if (first == '*' || first == '!' || first == '@') {
+        if (first == '*' || first == '!' || first == '@' || first == '$') {
             headerLines << line;
             continue;
         }

@@ -226,10 +226,27 @@ void GlueWizard::setupRunPage()
     m_progressBar->setFormat("%v% — %p%");
     centerCol->addWidget(m_progressBar);
 
+    QPushButton *showLogBtn = new QPushButton("Show Log");
+    showLogBtn->setCheckable(true);
+    showLogBtn->setChecked(false);
+    centerCol->addWidget(showLogBtn);
+
     m_logEdit = new QTextEdit;
     m_logEdit->setReadOnly(true);
     m_logEdit->setFont(QFont("Courier New", 8));
+    m_logEdit->setVisible(false);
     centerCol->addWidget(m_logEdit, 1);
+
+    connect(showLogBtn, &QPushButton::toggled, this, [this, showLogBtn](bool checked) {
+        m_logEdit->setVisible(checked);
+        showLogBtn->setText(checked ? "Hide Log" : "Show Log");
+        // Resize dialog to fit
+        if (checked)
+            resize(width(), qMax(height(), 600));
+        else
+            resize(width(), 420);
+    });
+
     hbox->addLayout(centerCol, 1);
 
     // Right: outputs
@@ -632,13 +649,14 @@ void GlueWizard::onRunGlue()
     m_totalRuns = m_runsSpin->value();
     m_glueRound = 0;
     m_lastIndicatorLine = 0;
+    m_progressBar->setRange(0, 0); // indeterminate (animated) until we get phase info
     m_progressBar->setValue(0);
     m_progressLabel->setText("Starting GLUE...");
 
-    // Poll process.txt every 500ms for per-run progress
+    // Poll ModelRunIndicator.txt every 800ms for phase-based progress
     m_pollTimer = new QTimer(this);
     connect(m_pollTimer, &QTimer::timeout, this, &GlueWizard::onPollProgress);
-    m_pollTimer->start(500);
+    m_pollTimer->start(800);
 
     m_runGlueBtn->setEnabled(false);
     m_stopGlueBtn->setEnabled(true);
@@ -677,41 +695,59 @@ void GlueWizard::onGlueOutput()
 
 void GlueWizard::onPollProgress()
 {
-    // Read process.txt — contains percentage 0-100 for current round
-    QString procFile = GLUE_WORK + "/process.txt";
-    QFile f(procFile);
-    if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        QString val = QString::fromLatin1(f.readAll()).trimmed();
-        f.close();
-        bool ok = false;
-        double pct = val.toDouble(&ok);
-        if (ok) {
-            // GLUE runs 2 rounds; map round+pct to 0-100 overall
-            int overall = (int)((m_glueRound * 100 + pct) / 2.0);
-            m_progressBar->setValue(qMin(overall, 99));
-            int runsThisRound = (int)(pct / 100.0 * m_totalRuns);
-            m_progressLabel->setText(QString("Round %1/2 — %2 / %3 simulations (%4%)")
-                .arg(m_glueRound + 1).arg(runsThisRound).arg(m_totalRuns).arg((int)pct));
-        }
-    }
+    // Phase-based progress from ModelRunIndicator.txt
+    // Each round has 6 phases mapped to 0-50% (round 1) and 50-100% (round 2):
+    //   "Random parameter sets have been generated..."  -> 1/6
+    //   "Model runs are starting..."                    -> 2/6
+    //   "Likelihood calculation is starting..."         -> 3/6
+    //   "Likelihood calculation is finished..."         -> 4/6
+    //   "Starting calculation of posterior..."          -> 5/6
+    //   "round of GLUE is finished"                     -> 6/6
+    static const QStringList phases = {
+        "Random parameter sets have been generated",
+        "Model runs are starting",
+        "Likelihood calculation is starting",
+        "Likelihood calculation is finished",
+        "Starting calculation of posterior",
+        "round of GLUE is finished"
+    };
 
-    // Also read new lines from ModelRunIndicator.txt for round transitions
     QString indFile = GLUE_WORK + "/ModelRunIndicator.txt";
     QFile fi(indFile);
-    if (fi.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        QStringList lines = QString::fromLatin1(fi.readAll()).split('\n');
-        fi.close();
-        for (int i = m_lastIndicatorLine; i < lines.size(); ++i) {
-            QString line = lines[i].trimmed();
-            if (line.isEmpty()) continue;
-            if (line.startsWith("GLUE Flag: 2")) {
-                m_glueRound = 1;
-            } else if (line.contains("round of GLUE is finished")) {
-                // round finished
+    if (!fi.open(QIODevice::ReadOnly | QIODevice::Text)) return;
+    QStringList lines = QString::fromLatin1(fi.readAll()).split('\n');
+    fi.close();
+
+    int phaseInRound = 0; // 0-6 within current round
+
+    for (int i = m_lastIndicatorLine; i < lines.size(); ++i) {
+        QString line = lines[i].trimmed();
+        if (line.isEmpty()) continue;
+
+        if (line.startsWith("GLUE Flag: 2")) {
+            m_glueRound = 1;
+            phaseInRound = 0;
+        }
+
+        for (int p = 0; p < phases.size(); ++p) {
+            if (line.contains(phases[p])) {
+                phaseInRound = p + 1;
+                break;
             }
         }
-        m_lastIndicatorLine = lines.size();
+
+        // Update label with meaningful phase text
+        if (line.startsWith("Random parameter") || line.startsWith("Model runs") ||
+            line.startsWith("Likelihood") || line.startsWith("Starting calc") ||
+            line.contains("round of GLUE") || line.startsWith("GLUE Flag")) {
+            int overall = (int)((m_glueRound * 6 + phaseInRound) / 12.0 * 100);
+            m_progressBar->setRange(0, 100);
+            m_progressBar->setValue(qMin(overall, 99));
+            m_progressLabel->setText(QString("Round %1/2 — %2")
+                .arg(m_glueRound + 1).arg(line));
+        }
     }
+    m_lastIndicatorLine = lines.size();
 }
 
 void GlueWizard::onGlueFinished(int exitCode)

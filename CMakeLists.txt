@@ -73,6 +73,7 @@ set(SOURCES
     src/EcoTableModel.cpp
     src/BackupManager.cpp
     src/SpeGraphWidget.cpp
+    src/GlueWizard.cpp
 )
 
 # Header files
@@ -91,6 +92,7 @@ set(HEADERS
     include/EcoTableModel.h
     include/BackupManager.h
     include/SpeGraphWidget.h
+    include/GlueWizard.h
 )
 
 # Add version resource for Windows

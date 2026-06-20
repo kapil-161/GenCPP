@@ -5,6 +5,7 @@
 #include "SpeEditor.h"
 #include "SpeSyntaxHighlighter.h"
 #include "Config.h"
+#include "GlueWizard.h"
 #include <QApplication>
 #include <QMenuBar>
 #include <QStatusBar>
@@ -260,8 +261,26 @@ void MainWindow::setupCulTab(QWidget *tab)
     culGlueBtn->setToolTip("Paste a GLUE-calibrated cultivar line to update or add a row");
     connect(culGlueBtn, &QPushButton::clicked, this, &MainWindow::onCulPasteGlue);
 
+    QPushButton *runGlueBtn = makeBtn("Run GLUE");
+    runGlueBtn->setToolTip("Launch GLUE calibration for the selected cultivar");
+    runGlueBtn->setStyleSheet("font-weight:bold; background:#2196F3; color:white;");
+    connect(runGlueBtn, &QPushButton::clicked, this, [this]() {
+        QModelIndex idx = m_culView->currentIndex();
+        if (!idx.isValid()) {
+            QMessageBox::warning(this, "Run GLUE", "Please select a cultivar row first.");
+            return;
+        }
+        QModelIndex srcIdx = m_culProxy->mapToSource(idx);
+        QString varNum = m_culModel->data(m_culModel->index(srcIdx.row(), CulTableModel::COL_VARNUM)).toString().trimmed();
+        QString vrName = m_culModel->data(m_culModel->index(srcIdx.row(), CulTableModel::COL_VRNAME)).toString().trimmed();
+        GlueWizard *wizard = new GlueWizard(m_dssatDirEdit->text().trimmed(),
+                                             m_currentCropCode, varNum, vrName, this);
+        wizard->setAttribute(Qt::WA_DeleteOnClose);
+        wizard->exec();
+    });
+
     for (auto *b : {m_culAddBtn, m_culDelBtn, m_culDupBtn, m_culSaveBtn,
-                    m_culExportBtn, m_culImportBtn, m_culValidateBtn, culGlueBtn})
+                    m_culExportBtn, m_culImportBtn, m_culValidateBtn, culGlueBtn, runGlueBtn})
         toolbar->addWidget(b);
 
     vbox->addLayout(toolbar);

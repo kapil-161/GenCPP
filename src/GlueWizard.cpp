@@ -1,0 +1,457 @@
+#include "GlueWizard.h"
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QGridLayout>
+#include <QGroupBox>
+#include <QFileDialog>
+#include <QMessageBox>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QTextStream>
+#include <QDirIterator>
+#include <QLabel>
+#include <QSplitter>
+#include <QProcess>
+#include <QDateTime>
+#include <QRegularExpression>
+#include <QFont>
+
+static const QString GLUE_DIR    = "C:/DSSAT48/Tools/GLUE";
+static const QString GLUE_WORK   = "C:/DSSAT48/GLWork";
+static const QString BACKUP_DEFAULT = "C:/DSSAT48/GLWork/BackUp";
+static const QString R_TERM      = "C:/PROGRA~1/R/R-45~1.2/bin/x64/RTerm.exe";
+
+GlueWizard::GlueWizard(const QString &dssatDir,
+                       const QString &cropCode,
+                       const QString &cultivarId,
+                       const QString &cultivarName,
+                       QWidget *parent)
+    : QDialog(parent)
+    , m_dssatDir(dssatDir)
+    , m_cropCode(cropCode)
+    , m_cultivarId(cultivarId)
+    , m_cultivarName(cultivarName)
+{
+    setWindowTitle(QString("Run GLUE — %1 / %2 %3")
+                   .arg(cropCode, cultivarId, cultivarName));
+    setMinimumSize(620, 480);
+
+    m_stack = new QStackedWidget(this);
+    QVBoxLayout *main = new QVBoxLayout(this);
+    main->addWidget(m_stack);
+
+    setupTreatmentPage();
+    setupBackupPage();
+    setupRunPage();
+
+    m_stack->setCurrentIndex(0);
+    scanExperiments();
+}
+
+// ── Page 1: treatment tree ────────────────────────────────────────────────────
+void GlueWizard::setupTreatmentPage()
+{
+    QWidget *page = new QWidget;
+    QVBoxLayout *vbox = new QVBoxLayout(page);
+
+    QLabel *title = new QLabel(
+        QString("<b>Select Treatments to Include</b><br>"
+                "<small>Crop: %1 &nbsp; Cultivar: %2 %3</small>")
+        .arg(m_cropCode, m_cultivarId, m_cultivarName));
+    vbox->addWidget(title);
+
+    QHBoxLayout *content = new QHBoxLayout;
+
+    m_tree = new QTreeWidget;
+    m_tree->setHeaderHidden(true);
+    m_tree->setRootIsDecorated(true);
+    content->addWidget(m_tree, 1);
+
+    QVBoxLayout *btnCol = new QVBoxLayout;
+    btnCol->setAlignment(Qt::AlignTop);
+    m_selectAllBtn   = new QPushButton("Select All");
+    m_unselectAllBtn = new QPushButton("Unselect All");
+    m_goBtn          = new QPushButton("Go !");
+    m_goBtn->setDefault(true);
+    btnCol->addWidget(m_selectAllBtn);
+    btnCol->addWidget(m_unselectAllBtn);
+    btnCol->addStretch();
+    btnCol->addWidget(m_goBtn);
+    content->addLayout(btnCol);
+
+    vbox->addLayout(content);
+
+    connect(m_selectAllBtn,   &QPushButton::clicked, this, &GlueWizard::onSelectAll);
+    connect(m_unselectAllBtn, &QPushButton::clicked, this, &GlueWizard::onUnselectAll);
+    connect(m_goBtn,          &QPushButton::clicked, this, &GlueWizard::onGoFromTreatments);
+
+    m_stack->addWidget(page);
+}
+
+// ── Page 2: backup ───────────────────────────────────────────────────────────
+void GlueWizard::setupBackupPage()
+{
+    QWidget *page = new QWidget;
+    QVBoxLayout *vbox = new QVBoxLayout(page);
+    vbox->addStretch();
+
+    QLabel *lbl = new QLabel("<b>Backup existing GLUE work files before running?</b>");
+    lbl->setAlignment(Qt::AlignCenter);
+    vbox->addWidget(lbl);
+
+    QHBoxLayout *dirRow = new QHBoxLayout;
+    dirRow->addWidget(new QLabel("Backup folder:"));
+    m_backupDirEdit = new QLineEdit(BACKUP_DEFAULT);
+    dirRow->addWidget(m_backupDirEdit, 1);
+    m_backupBrowseBtn = new QPushButton("Browse…");
+    dirRow->addWidget(m_backupBrowseBtn);
+    vbox->addLayout(dirRow);
+
+    QHBoxLayout *btnRow = new QHBoxLayout;
+    btnRow->setAlignment(Qt::AlignCenter);
+    m_backupYesBtn = new QPushButton("Yes — Backup");
+    m_backupNoBtn  = new QPushButton("No — Skip");
+    m_backupYesBtn->setFixedWidth(130);
+    m_backupNoBtn->setFixedWidth(130);
+    btnRow->addWidget(m_backupYesBtn);
+    btnRow->addWidget(m_backupNoBtn);
+    vbox->addLayout(btnRow);
+
+    vbox->addStretch();
+
+    connect(m_backupBrowseBtn, &QPushButton::clicked, this, &GlueWizard::onBrowseBackup);
+    connect(m_backupYesBtn, &QPushButton::clicked, this, [this]() {
+        QString dest = m_backupDirEdit->text().trimmed();
+        QDir().mkpath(dest);
+        QDirIterator it(GLUE_WORK, QDir::Files, QDirIterator::Subdirectories);
+        while (it.hasNext()) {
+            QString src = it.next();
+            QString rel = QDir(GLUE_WORK).relativeFilePath(src);
+            QString dst = dest + "/" + rel;
+            QDir().mkpath(QFileInfo(dst).absolutePath());
+            QFile::copy(src, dst);
+        }
+        m_stack->setCurrentIndex(2);
+    });
+    connect(m_backupNoBtn, &QPushButton::clicked, this, [this]() {
+        m_stack->setCurrentIndex(2);
+    });
+
+    m_stack->addWidget(page);
+}
+
+// ── Page 3: run ──────────────────────────────────────────────────────────────
+void GlueWizard::setupRunPage()
+{
+    QWidget *page = new QWidget;
+    QHBoxLayout *hbox = new QHBoxLayout(page);
+
+    // Left: GLUE Parameters
+    QGroupBox *paramBox = new QGroupBox("GLUE Parameters");
+    QGridLayout *grid = new QGridLayout(paramBox);
+
+    grid->addWidget(new QLabel("Runs:"), 0, 0);
+    m_runsSpin = new QSpinBox;
+    m_runsSpin->setRange(100, 1000000);
+    m_runsSpin->setValue(20000);
+    m_runsSpin->setSingleStep(1000);
+    grid->addWidget(m_runsSpin, 0, 1);
+
+    grid->addWidget(new QLabel("Mode:"), 1, 0);
+    m_modeCombo = new QComboBox;
+    m_modeCombo->addItem("Both (Phenology + Growth)", 1);
+    m_modeCombo->addItem("Phenology Only",            2);
+    m_modeCombo->addItem("Growth Parameters",         3);
+    m_modeCombo->setCurrentIndex(0);
+    grid->addWidget(m_modeCombo, 1, 1);
+
+    grid->addWidget(new QLabel("Include ECO file:"), 2, 0);
+    m_ecoCheck = new QCheckBox;
+    grid->addWidget(m_ecoCheck, 2, 1);
+
+    hbox->addWidget(paramBox);
+
+    // Center: action buttons + log
+    QVBoxLayout *centerCol = new QVBoxLayout;
+    m_runGlueBtn  = new QPushButton("Run GLUE");
+    m_stopGlueBtn = new QPushButton("Stop GLUE");
+    m_startOverBtn = new QPushButton("Start Over");
+    m_stopGlueBtn->setEnabled(false);
+
+    m_runGlueBtn->setStyleSheet("font-weight:bold; background:#2196F3; color:white;");
+    centerCol->addWidget(m_runGlueBtn);
+    centerCol->addWidget(m_stopGlueBtn);
+    centerCol->addWidget(m_startOverBtn);
+
+    m_logEdit = new QTextEdit;
+    m_logEdit->setReadOnly(true);
+    m_logEdit->setFont(QFont("Courier New", 8));
+    centerCol->addWidget(m_logEdit, 1);
+    hbox->addLayout(centerCol, 1);
+
+    // Right: outputs
+    QGroupBox *outBox = new QGroupBox("GLUE Outputs");
+    QVBoxLayout *outCol = new QVBoxLayout(outBox);
+    m_outCoeffBtn = new QPushButton("Cultivar Coefficients");
+    m_outDevBtn   = new QPushButton("Development");
+    m_outYieldBtn = new QPushButton("Growth and Yield");
+    for (auto *b : {m_outCoeffBtn, m_outDevBtn, m_outYieldBtn}) {
+        b->setEnabled(false);
+        outCol->addWidget(b);
+    }
+    outCol->addStretch();
+    hbox->addWidget(outBox);
+
+    connect(m_runGlueBtn,  &QPushButton::clicked, this, &GlueWizard::onRunGlue);
+    connect(m_stopGlueBtn, &QPushButton::clicked, this, &GlueWizard::onStopGlue);
+    connect(m_startOverBtn, &QPushButton::clicked, this, &GlueWizard::onStartOver);
+
+    // Output buttons open the result files
+    connect(m_outCoeffBtn, &QPushButton::clicked, this, [this]() {
+        QProcess::startDetached("notepad", {GLUE_WORK + "/OptimalParameterSet.txt"});
+    });
+    connect(m_outDevBtn, &QPushButton::clicked, this, [this]() {
+        QProcess::startDetached("notepad", {GLUE_WORK + "/Evaluate_output.txt"});
+    });
+    connect(m_outYieldBtn, &QPushButton::clicked, this, [this]() {
+        QProcess::startDetached("notepad", {GLUE_WORK + "/EvaluateFrame_2.txt"});
+    });
+
+    m_stack->addWidget(page);
+}
+
+// ── Scan experiments ──────────────────────────────────────────────────────────
+void GlueWizard::scanExperiments()
+{
+    m_tree->clear();
+    QDirIterator it(m_dssatDir,
+                    QStringList() << "*.ALX" << "*.alx",
+                    QDir::Files,
+                    QDirIterator::Subdirectories);
+
+    while (it.hasNext()) {
+        QString filePath = it.next();
+        QFile f(filePath);
+        if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) continue;
+
+        QTextStream in(&f);
+        QString content = in.readAll();
+        f.close();
+
+        if (!content.contains(m_cultivarId, Qt::CaseInsensitive)) continue;
+
+        // Parse treatments from @TRNO lines or @T lines
+        QStringList lines = content.split('\n');
+        QStringList treatments;
+        bool inTreatSection = false;
+        for (const QString &line : lines) {
+            QString trimmed = line.trimmed();
+            if (trimmed.startsWith("@T ") || trimmed.startsWith("@TRNO")) {
+                inTreatSection = true;
+                continue;
+            }
+            if (inTreatSection) {
+                if (trimmed.isEmpty() || trimmed.startsWith("@") || trimmed.startsWith("*")) {
+                    inTreatSection = false;
+                    continue;
+                }
+                // First token is treatment number, rest is name
+                QStringList parts = trimmed.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+                if (parts.size() >= 2) {
+                    treatments << QString("[%1] %2").arg(parts[0], parts.mid(1).join(" "));
+                } else if (parts.size() == 1) {
+                    treatments << QString("[%1]").arg(parts[0]);
+                }
+            }
+        }
+
+        if (treatments.isEmpty()) continue;
+
+        QTreeWidgetItem *parent = new QTreeWidgetItem(m_tree);
+        parent->setText(0, filePath);
+        parent->setCheckState(0, Qt::Unchecked);
+        parent->setExpanded(true);
+
+        for (const QString &tr : treatments) {
+            QTreeWidgetItem *child = new QTreeWidgetItem(parent);
+            child->setText(0, tr);
+            child->setCheckState(0, Qt::Unchecked);
+        }
+    }
+
+    if (m_tree->topLevelItemCount() == 0) {
+        QTreeWidgetItem *item = new QTreeWidgetItem(m_tree);
+        item->setText(0, "(No experiments found for this cultivar)");
+        item->setFlags(item->flags() & ~Qt::ItemIsUserCheckable);
+        m_goBtn->setEnabled(false);
+    }
+}
+
+// ── Slot: Select All ──────────────────────────────────────────────────────────
+void GlueWizard::onSelectAll()
+{
+    for (int i = 0; i < m_tree->topLevelItemCount(); ++i) {
+        QTreeWidgetItem *parent = m_tree->topLevelItem(i);
+        parent->setCheckState(0, Qt::Checked);
+        for (int j = 0; j < parent->childCount(); ++j)
+            parent->child(j)->setCheckState(0, Qt::Checked);
+    }
+}
+
+void GlueWizard::onUnselectAll()
+{
+    for (int i = 0; i < m_tree->topLevelItemCount(); ++i) {
+        QTreeWidgetItem *parent = m_tree->topLevelItem(i);
+        parent->setCheckState(0, Qt::Unchecked);
+        for (int j = 0; j < parent->childCount(); ++j)
+            parent->child(j)->setCheckState(0, Qt::Unchecked);
+    }
+}
+
+// ── Slot: Go from treatments → backup ────────────────────────────────────────
+void GlueWizard::onGoFromTreatments()
+{
+    m_selectedFiles = selectedTreatmentFiles();
+    if (m_selectedFiles.isEmpty()) {
+        QMessageBox::warning(this, "No selection",
+                             "Please select at least one treatment.");
+        return;
+    }
+    m_stack->setCurrentIndex(1);
+}
+
+QStringList GlueWizard::selectedTreatmentFiles()
+{
+    QStringList files;
+    for (int i = 0; i < m_tree->topLevelItemCount(); ++i) {
+        QTreeWidgetItem *parent = m_tree->topLevelItem(i);
+        bool anyChild = false;
+        for (int j = 0; j < parent->childCount(); ++j) {
+            if (parent->child(j)->checkState(0) == Qt::Checked) {
+                anyChild = true;
+                break;
+            }
+        }
+        if (anyChild || parent->checkState(0) == Qt::Checked)
+            files << parent->text(0);
+    }
+    return files;
+}
+
+// ── Slot: Back ────────────────────────────────────────────────────────────────
+void GlueWizard::onBackToTreatments()
+{
+    m_stack->setCurrentIndex(0);
+}
+
+// ── Slot: Browse backup folder ────────────────────────────────────────────────
+void GlueWizard::onBrowseBackup()
+{
+    QString dir = QFileDialog::getExistingDirectory(
+        this, "Select Backup Folder", m_backupDirEdit->text());
+    if (!dir.isEmpty())
+        m_backupDirEdit->setText(dir);
+}
+
+// ── Slot: Run GLUE ────────────────────────────────────────────────────────────
+void GlueWizard::onRunGlue()
+{
+    // Write SimulationControl.csv with current settings
+    int glueFlag = m_modeCombo->currentData().toInt();
+    QString ecoCalib = m_ecoCheck->isChecked() ? "Y" : "N";
+    int runs = m_runsSpin->value();
+
+    QString simCtrlPath = GLUE_DIR + "/SimulationControl.csv";
+    QFile sc(simCtrlPath);
+    if (!sc.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QMessageBox::critical(this, "Error", "Cannot open SimulationControl.csv");
+        return;
+    }
+    QStringList lines;
+    QTextStream in(&sc);
+    while (!in.atEnd()) lines << in.readLine();
+    sc.close();
+
+    // Update relevant fields
+    for (QString &line : lines) {
+        if (line.startsWith("NumberOfModelRun,"))
+            line = QString("NumberOfModelRun,%1").arg(runs);
+        else if (line.startsWith("GLUEFlag,"))
+            line = QString("GLUEFlag,%1").arg(glueFlag);
+        else if (line.startsWith("EcotypeCalibration,"))
+            line = QString("EcotypeCalibration,%1").arg(ecoCalib);
+        else if (line.startsWith("CultivarBatchFile,"))
+            line = QString("CultivarBatchFile,%1.MZC").arg(m_cultivarId);
+    }
+
+    QFile scOut(simCtrlPath);
+    if (!scOut.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QMessageBox::critical(this, "Error", "Cannot write SimulationControl.csv");
+        return;
+    }
+    QTextStream out(&scOut);
+    for (const QString &l : lines) out << l << "\n";
+    scOut.close();
+
+    m_logEdit->clear();
+    m_logEdit->append("Starting GLUE calibration...");
+    m_logEdit->append(QString("Cultivar: %1 %2").arg(m_cultivarId, m_cultivarName));
+    m_logEdit->append(QString("Runs: %1  Mode: %2  ECO: %3")
+                      .arg(runs).arg(m_modeCombo->currentText()).arg(ecoCalib));
+    m_logEdit->append("---");
+
+    m_glueProcess = new QProcess(this);
+    m_glueProcess->setWorkingDirectory(GLUE_DIR);
+    connect(m_glueProcess, &QProcess::readyReadStandardOutput, this, &GlueWizard::onGlueOutput);
+    connect(m_glueProcess, &QProcess::readyReadStandardError,  this, &GlueWizard::onGlueOutput);
+    connect(m_glueProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+            this, [this](int code, QProcess::ExitStatus){ onGlueFinished(code); });
+
+    m_glueProcess->start(R_TERM, {"--slave", "--file=" + GLUE_DIR + "/GLUE.r"});
+
+    m_runGlueBtn->setEnabled(false);
+    m_stopGlueBtn->setEnabled(true);
+}
+
+void GlueWizard::onStopGlue()
+{
+    if (m_glueProcess && m_glueProcess->state() != QProcess::NotRunning) {
+        m_glueProcess->kill();
+        m_logEdit->append("\n[Stopped by user]");
+    }
+}
+
+void GlueWizard::onStartOver()
+{
+    onStopGlue();
+    m_logEdit->clear();
+    m_runGlueBtn->setEnabled(true);
+    m_stopGlueBtn->setEnabled(false);
+    for (auto *b : {m_outCoeffBtn, m_outDevBtn, m_outYieldBtn})
+        b->setEnabled(false);
+    m_stack->setCurrentIndex(0);
+    scanExperiments();
+}
+
+void GlueWizard::onGlueOutput()
+{
+    if (!m_glueProcess) return;
+    QByteArray out = m_glueProcess->readAllStandardOutput();
+    QByteArray err = m_glueProcess->readAllStandardError();
+    if (!out.isEmpty()) m_logEdit->append(QString::fromLocal8Bit(out).trimmed());
+    if (!err.isEmpty()) m_logEdit->append(QString::fromLocal8Bit(err).trimmed());
+}
+
+void GlueWizard::onGlueFinished(int exitCode)
+{
+    m_runGlueBtn->setEnabled(true);
+    m_stopGlueBtn->setEnabled(false);
+    if (exitCode == 0) {
+        m_logEdit->append("\n✓ GLUE calibration finished successfully.");
+        for (auto *b : {m_outCoeffBtn, m_outDevBtn, m_outYieldBtn})
+            b->setEnabled(true);
+    } else {
+        m_logEdit->append(QString("\n✗ GLUE exited with code %1.").arg(exitCode));
+    }
+}

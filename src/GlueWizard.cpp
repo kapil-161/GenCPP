@@ -84,6 +84,18 @@ void GlueWizard::setupTreatmentPage()
     connect(m_unselectAllBtn, &QPushButton::clicked, this, &GlueWizard::onUnselectAll);
     connect(m_goBtn,          &QPushButton::clicked, this, &GlueWizard::onGoFromTreatments);
 
+    connect(m_tree, &QTreeWidget::itemChanged, this, [this](QTreeWidgetItem *item) {
+        QTreeWidgetItem *parent = item->parent();
+        if (!parent) return; // it's a top-level (experiment) item, ignore
+        // Block signals to avoid recursion
+        m_tree->blockSignals(true);
+        bool anyChecked = false;
+        for (int i = 0; i < parent->childCount(); ++i)
+            if (parent->child(i)->checkState(0) == Qt::Checked) { anyChecked = true; break; }
+        parent->setCheckState(0, anyChecked ? Qt::Checked : Qt::Unchecked);
+        m_tree->blockSignals(false);
+    });
+
     m_stack->addWidget(page);
 }
 

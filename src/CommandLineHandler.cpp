@@ -2,6 +2,7 @@
 #include "CulParser.h"
 #include "EcoParser.h"
 #include "DssatProParser.h"
+#include "GlueRunner.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -301,43 +302,108 @@ int CommandLineHandler::runTests()
 int CommandLineHandler::runGlue(const CommandLineArgs &a)
 {
     if (a.cropCode.isEmpty() || a.cultivarId.isEmpty()) {
-        fprintf(stderr, "Usage: Gen2.exe --glue --crop WH --cultivar IB0488 --name NEWTON\n");
+        fprintf(stderr, "Usage: GeneticsEditor.exe --glue --crop WH --cultivar IB0488 "
+                        "--name NEWTON [--runs 100] [--mode phenology|growth|both]\n");
         return 1;
     }
 
-    fprintf(stdout, "Starting headless GLUE: crop=%s cultivar=%s name=%s runs=%d mode=%s\n",
+    fprintf(stdout, "GLUE: crop=%s  cultivar=%s  name=%s  runs=%d  mode=%s\n",
             qPrintable(a.cropCode), qPrintable(a.cultivarId),
             qPrintable(a.cultivarName), a.runs, qPrintable(a.mode));
     fflush(stdout);
 
-    // Find RTerm
-    QString rterm;
-    QStringList versions = {"R-4.6.0","R-4.5.3","R-4.5.2","R-4.5.1","R-4.4.2","R-4.4.1","R-4.3.3"};
-    for (const QString &ver : versions) {
-        QString p = QString("C:/Program Files/R/%1/bin/x64/RTerm.exe").arg(ver);
-        if (QFileInfo::exists(p)) { rterm = p; break; }
+    // ── 1. Resolve CropInfo ───────────────────────────────────────────────────
+    QMap<QString, CropInfo> crops = DssatProParser::discoverCrops("C:/DSSAT48/DSSATPRO.v48");
+    CropInfo cropInfo;
+    for (const CropInfo &c : crops) {
+        if (c.cropCode.compare(a.cropCode, Qt::CaseInsensitive) != 0) continue;
+        // Prefer the DSSATPRO-designated primary model; fall back to any match
+        if (cropInfo.cropCode.isEmpty() || c.isPrimary)
+            cropInfo = c;
     }
-    if (rterm.isEmpty()) {
-        // scan
-        QDir rBase("C:/Program Files/R");
-        for (const QString &d : rBase.entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
-            QString p = QString("C:/Program Files/R/%1/bin/x64/RTerm.exe").arg(d);
-            if (QFileInfo::exists(p)) { rterm = p; break; }
-        }
+    if (cropInfo.cropCode.isEmpty()) {
+        fprintf(stderr, "ERROR: crop '%s' not found in DSSATPRO.v48\n",
+                qPrintable(a.cropCode));
+        return 1;
     }
-    if (rterm.isEmpty()) rterm = "RTerm.exe";
-    fprintf(stdout, "RTerm: %s\n", qPrintable(rterm)); fflush(stdout);
+    fprintf(stdout, "Crop: %s  Module: %s  ExpDir: %s\n",
+            qPrintable(cropInfo.cropCode), qPrintable(cropInfo.module),
+            qPrintable(cropInfo.expDir));
+    fflush(stdout);
 
-    // Run R
+    // ── 2. Scan experiments ───────────────────────────────────────────────────
+    fprintf(stdout, "Scanning experiments in: %s\n", qPrintable(cropInfo.expDir));
+    fflush(stdout);
+
+    ScanResult scan = GlueRunner::scanExperiments(cropInfo, a.cultivarId, false);
+    if (!scan.errorMsg.isEmpty()) {
+        fprintf(stderr, "ERROR: %s\n", qPrintable(scan.errorMsg));
+        return 1;
+    }
+    if (scan.filesScanned == 0) {
+        fprintf(stderr, "ERROR: No .%sX experiment files found in: %s\n",
+                qPrintable(a.cropCode), qPrintable(cropInfo.expDir));
+        return 1;
+    }
+    if (scan.treatments.isEmpty()) {
+        fprintf(stderr, "ERROR: Cultivar %s not found in any of %d experiment file(s)\n",
+                qPrintable(a.cultivarId), scan.filesScanned);
+        return 1;
+    }
+
+    // Count total treatments
+    int totalTreatments = 0;
+    for (const auto &list : scan.treatments) totalTreatments += list.size();
+    fprintf(stdout, "Found %d treatment(s) across %d file(s)\n",
+            totalTreatments, scan.treatments.size());
+    for (auto it = scan.treatments.begin(); it != scan.treatments.end(); ++it) {
+        for (const TreatmentEntry &e : it.value())
+            fprintf(stdout, "  %s  trt %d\n",
+                    qPrintable(QDir::toNativeSeparators(it.key())), e.number);
+    }
+    fflush(stdout);
+
+    // ── 3. Write DSSBatch file ────────────────────────────────────────────────
+    QString batchPath = GlueRunner::writeBatchFile(
+        cropInfo, a.cultivarId, a.cultivarName, scan.treatments);
+    if (batchPath.isEmpty()) {
+        fprintf(stderr, "ERROR: Cannot write batch file to %s\n",
+                qPrintable(GlueRunner::GLUE_WORK));
+        return 1;
+    }
+    fprintf(stdout, "Batch file: %s\n", qPrintable(QDir::toNativeSeparators(batchPath)));
+    fflush(stdout);
+
+    // ── 4. Update SimulationControl.csv ──────────────────────────────────────
+    // Map --mode string to GLUEFlag integer: 1=both, 2=phenology, 3=growth
+    int glueFlag = 1;
+    if (a.mode == "phenology") glueFlag = 2;
+    else if (a.mode == "growth") glueFlag = 3;
+
+    if (!GlueRunner::updateSimControl(cropInfo, a.cultivarId, a.runs, glueFlag, "N")) {
+        fprintf(stderr, "ERROR: Cannot update %s/SimulationControl.csv\n",
+                qPrintable(GlueRunner::GLUE_DIR));
+        return 1;
+    }
+    fprintf(stdout, "SimulationControl.csv updated (runs=%d, glueFlag=%d)\n",
+            a.runs, glueFlag);
+    fflush(stdout);
+
+    // ── 5. Launch RTerm ───────────────────────────────────────────────────────
+    QString rterm = GlueRunner::findRTerm();
+    fprintf(stdout, "RTerm: %s\n", qPrintable(rterm));
+    fprintf(stdout, "--- GLUE output ---\n");
+    fflush(stdout);
+
     QProcess proc;
-    proc.setWorkingDirectory("C:/DSSAT48/Tools/GLUE");
+    proc.setWorkingDirectory(GlueRunner::GLUE_DIR);
     proc.setProgram(rterm);
-    proc.setArguments({"--slave", "--file=GLUE.r"});
+    proc.setArguments({"--slave", "--file=" + GlueRunner::GLUE_DIR + "/GLUE.r"});
     proc.setProcessChannelMode(QProcess::MergedChannels);
 
     proc.start();
     if (!proc.waitForStarted(5000)) {
-        fprintf(stderr, "Failed to start RTerm\n");
+        fprintf(stderr, "ERROR: Failed to start RTerm\n");
         return 1;
     }
 
@@ -352,10 +418,13 @@ int CommandLineHandler::runGlue(const CommandLineArgs &a)
     }
 
     QByteArray remaining = proc.readAll();
-    if (!remaining.isEmpty()) fprintf(stdout, "%s", remaining.constData());
+    if (!remaining.isEmpty()) {
+        fprintf(stdout, "%s", remaining.constData());
+        fflush(stdout);
+    }
 
     int code = proc.exitCode();
-    fprintf(stdout, "\nGLUE finished with exit code %d\n", code);
+    fprintf(stdout, "\n--- GLUE finished (exit code %d) ---\n", code);
     fflush(stdout);
     return code;
 }

@@ -1,4 +1,5 @@
 #include "GlueWizard.h"
+#include "GlueRunner.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGridLayout>
@@ -20,29 +21,9 @@
 #include <QGuiApplication>
 #include <QClipboard>
 
-static const QString GLUE_DIR       = "C:/DSSAT48/Tools/GLUE";
-static const QString GLUE_WORK      = "C:/DSSAT48/GLWork";
+static const QString GLUE_DIR       = GlueRunner::GLUE_DIR;
+static const QString GLUE_WORK      = GlueRunner::GLUE_WORK;
 static const QString BACKUP_DEFAULT = "C:/DSSAT48/GLWork/BackUp";
-
-static QString findRTerm()
-{
-    // Try versions from newest to oldest
-    QStringList versions = {"R-4.6.0","R-4.5.3","R-4.5.2","R-4.5.1","R-4.4.2","R-4.4.1","R-4.3.3"};
-    QStringList bases = {"C:/Program Files/R", "C:/PROGRA~1/R"};
-    for (const QString &base : bases) {
-        for (const QString &ver : versions) {
-            QString path = base + "/" + ver + "/bin/x64/RTerm.exe";
-            if (QFileInfo::exists(path)) return path;
-        }
-        // Also try any installed version via directory scan
-        QDir rBase(base);
-        for (const QString &d : rBase.entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
-            QString path = base + "/" + d + "/bin/x64/RTerm.exe";
-            if (QFileInfo::exists(path)) return path;
-        }
-    }
-    return "RTerm.exe"; // fallback to PATH
-}
 
 GlueWizard::GlueWizard(const CropInfo &cropInfo,
                        const QString &cultivarId,
@@ -351,167 +332,47 @@ void GlueWizard::setupRunPage()
 }
 
 // ── Scan experiments ──────────────────────────────────────────────────────────
-// For each experiment file (*X):
-//   1. Parse *CULTIVARS section: find the 6-digit cultivar ID -> get its @C number
-//   2. Parse *TREATMENTS section: find treatments where CU column == that @C number
-//   3. List only those matching treatments
 void GlueWizard::scanExperiments()
 {
     m_tree->clear();
 
-    if (m_cropInfo.expDir.isEmpty()) {
+    ScanResult scan = GlueRunner::scanExperiments(m_cropInfo, m_cultivarId);
+
+    if (!scan.errorMsg.isEmpty()) {
         QTreeWidgetItem *item = new QTreeWidgetItem(m_tree);
-        item->setText(0, QString("No experiment directory configured for crop %1 (check DSSATPRO.v48)")
-                         .arg(m_cropInfo.cropCode));
+        item->setText(0, scan.errorMsg + " (check DSSATPRO.v48)");
         item->setFlags(item->flags() & ~Qt::ItemIsUserCheckable);
         m_goBtn->setEnabled(false);
         return;
     }
 
     QString xExt = m_cropInfo.cropCode + "X";
-    QDirIterator it(m_cropInfo.expDir,
-                    QStringList() << "*." + xExt << "*." + xExt.toLower(),
-                    QDir::Files,
-                    QDirIterator::Subdirectories);
 
-    int filesScanned = 0;
-    int filesWithCultivar = 0;
-
-    while (it.hasNext()) {
-        QString filePath = it.next();
-        filesScanned++;
-
-        QFile f(filePath);
-        if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) continue;
-
-        QStringList allLines;
-        QTextStream in(&f);
-        while (!in.atEnd()) allLines << in.readLine();
-        f.close();
-
-        // ── Step 1: find cultivar number from *CULTIVARS section ──────────────
-        // Header: @C CR INGENO CNAME
-        // Data:    1 LU LU0001 Rex
-        // We look for m_cultivarId (6-digit) in INGENO column (col index 2)
-        int cultivarNum = -1;
-        bool inCulSection = false;
-        int cuCol = -1; // column index of INGENO in the header
-        int crCol = -1; // column index of CR in the header
-
-        for (const QString &line : allLines) {
-            QString trimmed = line.trimmed();
-            if (trimmed.isEmpty() || trimmed.startsWith('!')) continue;
-
-            if (trimmed.startsWith("*CULTIVAR")) {
-                inCulSection = true;
-                cuCol = -1;
-                continue;
-            }
-            if (inCulSection) {
-                if (trimmed.startsWith('*')) { inCulSection = false; continue; }
-                if (trimmed.startsWith("@C")) {
-                    QStringList hdrs = trimmed.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
-                    cuCol = hdrs.indexOf("INGENO");
-                    crCol = hdrs.indexOf("CR");
-                    continue;
-                }
-                if (trimmed.startsWith('@')) continue;
-                if (cuCol < 0) continue;
-
-                QStringList parts = trimmed.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
-                if (parts.size() <= cuCol) continue;
-                // Verify CR matches crop code to avoid cross-crop false matches
-                if (crCol >= 0 && crCol < parts.size() &&
-                    parts[crCol].compare(m_cropInfo.cropCode, Qt::CaseInsensitive) != 0)
-                    continue;
-                if (parts[cuCol].compare(m_cultivarId, Qt::CaseInsensitive) == 0) {
-                    cultivarNum = parts[0].toInt();
-                    break;
-                }
-            }
-        }
-
-        if (cultivarNum < 0) continue; // cultivar not in this file
-        filesWithCultivar++;
-
-        // ── Step 2: find treatments using character positions from header ────────
-        // Header: @N R O C TNAME.................... CU FL SA IC ...
-        // TNAME is fixed-width (25 chars), CU is immediately after it
-        // Use character position of "CU" in header to read CU value from data lines
-        QStringList matchingTreatments;
-        bool inTrtSection = false;
-        int cuCharPos  = -1; // character position of "CU" column in header
-        int tnameStart = -1; // character position of TNAME in the header line
-
-        for (const QString &line : allLines) {
-            QString trimmed = line.trimmed();
-            if (trimmed.isEmpty() || trimmed.startsWith('!')) continue;
-
-            if (trimmed.startsWith("*TREATMENT")) {
-                inTrtSection = true;
-                cuCharPos = -1;
-                continue;
-            }
-            if (inTrtSection) {
-                if (trimmed.startsWith('*')) { inTrtSection = false; continue; }
-
-                if (trimmed.startsWith("@N")) {
-                    tnameStart = line.indexOf("TNAME");
-                    cuCharPos  = line.indexOf(" CU ");
-                    if (cuCharPos >= 0) cuCharPos++; // skip the leading space
-                    continue;
-                }
-                if (trimmed.startsWith('@')) continue;
-                if (cuCharPos < 0 || tnameStart < 0) continue;
-                if (line.length() <= cuCharPos) continue;
-
-                bool ok;
-                int trtNum = line.left(3).trimmed().toInt(&ok);
-                if (!ok) continue;
-
-                // Read CU value from the character position (2 chars wide)
-                int cuVal = line.mid(cuCharPos, 3).trimmed().toInt();
-                if (cuVal != cultivarNum) continue;
-
-                // Extract TNAME by character position (25 chars wide)
-                QString tname;
-                if (line.length() > tnameStart)
-                    tname = line.mid(tnameStart, 25).trimmed();
-                if (tname.isEmpty())
-                    tname = line.trimmed().split(QRegularExpression("\\s+"), Qt::SkipEmptyParts).value(4);
-
-                matchingTreatments << QString("[%1] %2").arg(trtNum).arg(tname);
-            }
-        }
-
-        if (matchingTreatments.isEmpty()) continue;
-
+    for (auto it = scan.treatments.begin(); it != scan.treatments.end(); ++it) {
         QTreeWidgetItem *parent = new QTreeWidgetItem(m_tree);
-        parent->setText(0, filePath);
+        parent->setText(0, it.key());
         parent->setCheckState(0, Qt::Unchecked);
         parent->setExpanded(true);
-
-        for (const QString &tr : matchingTreatments) {
+        for (const TreatmentEntry &e : it.value()) {
             QTreeWidgetItem *child = new QTreeWidgetItem(parent);
-            child->setText(0, tr);
+            child->setText(0, QString("[%1] %2").arg(e.number).arg(e.name));
             child->setCheckState(0, Qt::Unchecked);
         }
     }
 
     m_scanStatusLabel->hide();
     if (m_tree->topLevelItemCount() == 0) {
-        QString msg;
-        QString style;
-        if (filesScanned == 0) {
-            msg = QString("No .%1 files found in: %2").arg(xExt, m_cropInfo.expDir);
+        QString msg, style;
+        if (scan.filesScanned == 0) {
+            msg   = QString("No .%1 files found in: %2").arg(xExt, m_cropInfo.expDir);
             style = "padding: 4px 8px; background:#F44336; color:white; border-radius:3px;";
-        } else if (filesWithCultivar == 0) {
-            msg = QString("Scanned %1 .%2 file(s) — cultivar %3 not found in any experiment.")
-                      .arg(filesScanned).arg(xExt).arg(m_cultivarId);
+        } else if (scan.filesWithCultivar == 0) {
+            msg   = QString("Scanned %1 .%2 file(s) — cultivar %3 not found in any experiment.")
+                        .arg(scan.filesScanned).arg(xExt).arg(m_cultivarId);
             style = "padding: 4px 8px; background:#FF9800; color:white; border-radius:3px;";
         } else {
-            msg = QString("Scanned %1 file(s), %2 contain cultivar %3 but have no matching treatments.")
-                      .arg(filesScanned).arg(filesWithCultivar).arg(m_cultivarId);
+            msg   = QString("Scanned %1 file(s), %2 contain cultivar %3 but have no matching treatments.")
+                        .arg(scan.filesScanned).arg(scan.filesWithCultivar).arg(m_cultivarId);
             style = "padding: 4px 8px; background:#FF9800; color:white; border-radius:3px;";
         }
         m_scanStatusLabel->setText(msg);
@@ -519,7 +380,6 @@ void GlueWizard::scanExperiments()
         m_scanStatusLabel->show();
         m_goBtn->setEnabled(false);
     } else {
-        m_scanStatusLabel->hide();
         m_goBtn->setEnabled(true);
     }
 }
@@ -548,20 +408,24 @@ void GlueWizard::onUnselectAll()
 // ── Slot: Go from treatments → backup ────────────────────────────────────────
 void GlueWizard::onGoFromTreatments()
 {
-    // Collect selected treatments: filePath -> list of treatment numbers
-    QMap<QString, QList<int>> selected;
+    // Collect selected treatments: filePath -> list of TreatmentEntry
+    TreatmentMap selected;
     for (int i = 0; i < m_tree->topLevelItemCount(); ++i) {
         QTreeWidgetItem *expItem = m_tree->topLevelItem(i);
         QString filePath = expItem->text(0);
         for (int j = 0; j < expItem->childCount(); ++j) {
             QTreeWidgetItem *trtItem = expItem->child(j);
             if (trtItem->checkState(0) != Qt::Checked) continue;
-            // Text format: "[1] TreatmentName" — extract number
+            // Text format: "[1] TreatmentName" — extract number and name
             QString txt = trtItem->text(0);
             int from = txt.indexOf('[') + 1;
             int to   = txt.indexOf(']');
-            if (from > 0 && to > from)
-                selected[filePath] << txt.mid(from, to - from).toInt();
+            if (from > 0 && to > from) {
+                TreatmentEntry e;
+                e.number = txt.mid(from, to - from).toInt();
+                e.name   = txt.mid(to + 2).trimmed();
+                selected[filePath] << e;
+            }
         }
     }
 
@@ -571,44 +435,13 @@ void GlueWizard::onGoFromTreatments()
         return;
     }
 
-    // Generate batch file: $BATCH(CULTIVAR):cropCode + cultivarId + " " + cultivarName
-    // GLUE.r reads: chars 18-19 = cropCode, chars 20-25 = cultivarId
-    // Format: "$BATCH(CULTIVAR):" (17 chars) + cropCode(2) + cultivarId(6) + " " + cultivarName
-    QString batchFileName = QString("%1.%2C").arg(m_cultivarId, m_cropInfo.cropCode);
-    QString batchPath = GLUE_WORK + "/" + batchFileName;
-
-    QDir().mkpath(GLUE_WORK);
-    QFile batchFile(batchPath);
-    if (!batchFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
+    QString batchPath = GlueRunner::writeBatchFile(
+        m_cropInfo, m_cultivarId, m_cultivarName, selected);
+    if (batchPath.isEmpty()) {
         QMessageBox::critical(this, "Error",
-                              "Cannot write batch file:\n" + batchPath);
+            "Cannot write batch file to:\n" + GlueRunner::GLUE_WORK);
         return;
     }
-
-    QTextStream out(&batchFile);
-    // Header line — fixed format GLUE.r expects
-    // chars 1-17: "$BATCH(CULTIVAR):", 18-19: cropCode, 20-25: cultivarId, 26+: " name"
-    // Limit cultivar name to 16 chars (VRNAME field width) to avoid bleed from adjacent fields
-    QString culName = m_cultivarName.trimmed().left(16).trimmed();
-    out << QString("$BATCH(CULTIVAR):%1%2 %3\n")
-           .arg(m_cropInfo.cropCode, m_cultivarId, culName);
-    out << " \n";
-    // Column header: "@FILEX" + spaces to col 94 + "TRTNO     RP     SQ     OP     CO"
-    // Total header line length must be 127 chars (matching DSSAT expectation)
-    out << QString("@FILEX%1TRTNO     RP     SQ     OP     CO\n")
-           .arg(QString(88, ' '));
-
-    // One data line per selected treatment
-    // File path padded to 93 chars, TRTNO right-aligned in 6, then fixed columns
-    for (auto it = selected.begin(); it != selected.end(); ++it) {
-        QString filePath = QDir::toNativeSeparators(it.key());
-        for (int trtNo : it.value()) {
-            QString padded = filePath.leftJustified(93, ' ');
-            out << QString("%1%2      0      0      0      0\n")
-                   .arg(padded).arg(trtNo, 6);
-        }
-    }
-    batchFile.close();
 
     m_selectedFiles = selected.keys();
     m_stack->setCurrentIndex(1);
@@ -637,44 +470,15 @@ void GlueWizard::onBrowseBackup()
 // ── Slot: Run GLUE ────────────────────────────────────────────────────────────
 void GlueWizard::onRunGlue()
 {
-    // Write SimulationControl.csv with current settings
-    int glueFlag = m_modeCombo->currentData().toInt();
+    int glueFlag  = m_modeCombo->currentData().toInt();
     QString ecoCalib = m_ecoCheck->isChecked() ? "Y" : "N";
     int runs = m_runsSpin->value();
 
-    QString simCtrlPath = GLUE_DIR + "/SimulationControl.csv";
-    QFile sc(simCtrlPath);
-    if (!sc.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        QMessageBox::critical(this, "Error", "Cannot open SimulationControl.csv");
+    if (!GlueRunner::updateSimControl(m_cropInfo, m_cultivarId, runs, glueFlag, ecoCalib)) {
+        QMessageBox::critical(this, "Error",
+            "Cannot open/write SimulationControl.csv:\n" + GlueRunner::GLUE_DIR);
         return;
     }
-    QStringList lines;
-    QTextStream in(&sc);
-    while (!in.atEnd()) lines << in.readLine();
-    sc.close();
-
-    // Update relevant fields
-    for (QString &line : lines) {
-        if (line.startsWith("NumberOfModelRun,"))
-            line = QString("NumberOfModelRun,%1").arg(runs);
-        else if (line.startsWith("GLUEFlag,"))
-            line = QString("GLUEFlag,%1").arg(glueFlag);
-        else if (line.startsWith("EcotypeCalibration,"))
-            line = QString("EcotypeCalibration,%1").arg(ecoCalib);
-        else if (line.startsWith("CultivarBatchFile,"))
-            line = QString("CultivarBatchFile,%1.%2C").arg(m_cultivarId, m_cropInfo.cropCode);
-        else if (line.startsWith("ModelID,"))
-            line = QString("ModelID,%1").arg(m_cropInfo.module);
-    }
-
-    QFile scOut(simCtrlPath);
-    if (!scOut.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        QMessageBox::critical(this, "Error", "Cannot write SimulationControl.csv");
-        return;
-    }
-    QTextStream out(&scOut);
-    for (const QString &l : lines) out << l << "\n";
-    scOut.close();
 
     m_logEdit->clear();
     m_logEdit->append("Starting GLUE calibration...");
@@ -684,14 +488,14 @@ void GlueWizard::onRunGlue()
     m_logEdit->append("---");
 
     m_glueProcess = new QProcess(this);
-    m_glueProcess->setWorkingDirectory(GLUE_DIR);
+    m_glueProcess->setWorkingDirectory(GlueRunner::GLUE_DIR);
     connect(m_glueProcess, &QProcess::readyReadStandardOutput, this, &GlueWizard::onGlueOutput);
     connect(m_glueProcess, &QProcess::readyReadStandardError,  this, &GlueWizard::onGlueOutput);
     connect(m_glueProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
             this, [this](int code, QProcess::ExitStatus){ onGlueFinished(code); });
 
-    QString rterm = findRTerm();
-    m_glueProcess->start(rterm, {"--slave", "--file=" + GLUE_DIR + "/GLUE.r"});
+    QString rterm = GlueRunner::findRTerm();
+    m_glueProcess->start(rterm, {"--slave", "--file=" + GlueRunner::GLUE_DIR + "/GLUE.r"});
 
     // Reset progress tracking
     m_totalRuns = m_runsSpin->value();

@@ -65,8 +65,9 @@ QMap<QString, CropInfo> DssatProParser::discoverCrops(const QString &dssatProPat
     };
 
     QString genoDir;
-    QMap<QString, QString> expDirMap;  // cropCode -> experiment dir
-    QMap<QString, QString> exeMap;     // cropCode -> exe name
+    QMap<QString, QString> expDirMap;       // cropCode -> experiment dir
+    QMap<QString, QString> exeMap;          // cropCode -> exe name
+    QMap<QString, QString> primaryModuleMap; // cropCode -> primary module from MXX line
 
     QTextStream proIn(&proFile);
     while (!proIn.atEnd()) {
@@ -81,11 +82,15 @@ QMap<QString, CropInfo> DssatProParser::discoverCrops(const QString &dssatProPat
         if (key == "CRD") {
             genoDir = reassemblePath(values);
         } else if (key.length() == 3 && key[0] == 'M' && !key.endsWith('D')) {
-            // M{XX} crop model entry — extract exe name
+            // M{XX} crop model entry — extract exe name and primary module
             QString cropCode = key.mid(1);
             for (const QString &v : values)
                 if (v.endsWith(".EXE", Qt::CaseInsensitive))
                     exeMap[cropCode] = v;
+            // Last token is the primary module code (e.g. "CSCER048" or "CRGRO048")
+            QString lastTok = values.last();
+            if (!lastTok.endsWith(".EXE", Qt::CaseInsensitive) && lastTok.length() >= 5)
+                primaryModuleMap[cropCode] = lastTok;  // e.g. "WH" -> "CSCER048"
         } else if (key.length() == 3 && key.endsWith('D') && key != "CRD") {
             // {XX}D experiment directory entry
             expDirMap[key.left(2)] = reassemblePath(values);
@@ -140,6 +145,10 @@ QMap<QString, CropInfo> DssatProParser::discoverCrops(const QString &dssatProPat
         info.speFile     = genoDir + QDir::separator() + base + ".SPE";
         info.cropCode    = cropCode;
         info.description = descr;
+        // Mark as primary if this is the module DSSATPRO.v48 designates for the crop
+        QString primaryMod = primaryModuleMap.value(cropCode);
+        info.isPrimary = !primaryMod.isEmpty() && base.startsWith(cropCode, Qt::CaseInsensitive)
+                         && base.contains(primaryMod.mid(2, 3), Qt::CaseInsensitive);
 
         result[base] = info;  // key = "MZCER048" (unique per model/crop pair)
     }

@@ -13,6 +13,7 @@ struct CropInfo {
     QString speFile;     // full path to .SPE file
     QString cropCode;    // 2-char code, e.g. "MZ"
     QString description; // e.g. "CERES-Maize"
+    bool isPrimary = false; // true if this is the MXX-designated model for the crop
 };
 
 class DssatProParser

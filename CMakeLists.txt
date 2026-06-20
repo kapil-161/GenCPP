@@ -74,6 +74,7 @@ set(SOURCES
     src/BackupManager.cpp
     src/SpeGraphWidget.cpp
     src/GlueWizard.cpp
+    src/GlueRunner.cpp
     src/CommandLineHandler.cpp
 )
 
@@ -94,6 +95,7 @@ set(HEADERS
     include/BackupManager.h
     include/SpeGraphWidget.h
     include/GlueWizard.h
+    include/GlueRunner.h
     include/CommandLineHandler.h
 )
 

@@ -166,6 +166,38 @@ if %ERRORLEVEL% neq 0 ( echo ERROR: NSIS packaging failed! & goto :skip_nsis )
 if not defined QUIET_MODE echo SUCCESS: Single portable exe saved to C:\DSSAT48\Tools\gen2\Gen2.exe
 
 :skip_nsis
+
+REM ── Step 8: Self-sign the exe to reduce Defender false positives ──────────────
+if not defined QUIET_MODE echo.
+if not defined QUIET_MODE echo Step 8: Code-signing Gen2.exe...
+
+set SIGNTOOL=
+if exist "C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64\signtool.exe" set SIGNTOOL=C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64\signtool.exe
+if exist "C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\signtool.exe" set SIGNTOOL=C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\signtool.exe
+if not defined SIGNTOOL (
+    for /d %%d in ("C:\Program Files (x86)\Windows Kits\10\bin\10.*") do (
+        if exist "%%d\x64\signtool.exe" set SIGNTOOL=%%d\x64\signtool.exe
+    )
+)
+
+if not defined SIGNTOOL (
+    echo WARNING: signtool.exe not found - skipping signing. Install Windows SDK to enable.
+    goto :skip_sign
+)
+
+REM Create self-signed cert if it doesn't already exist
+powershell -NoProfile -Command ^
+  "if (-not (Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Subject -eq 'CN=DSSAT Gen2' })) { New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=DSSAT Gen2' -CertStoreLocation Cert:\CurrentUser\My -NotAfter (Get-Date).AddYears(5) | Out-Null; Write-Host 'Created self-signed certificate.' } else { Write-Host 'Certificate already exists.' }"
+
+REM Sign the exe
+"%SIGNTOOL%" sign /fd SHA256 /n "DSSAT Gen2" /t http://timestamp.digicert.com "C:\DSSAT48\Tools\gen2\Gen2.exe" >nul 2>&1
+if %ERRORLEVEL% equ 0 (
+    if not defined QUIET_MODE echo SUCCESS: Gen2.exe signed successfully.
+) else (
+    echo WARNING: Signing failed - exe will still work but may be flagged by Defender.
+)
+
+:skip_sign
 if not defined QUIET_MODE (
     echo.
     echo ========================================

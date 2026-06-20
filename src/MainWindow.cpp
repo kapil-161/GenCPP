@@ -528,13 +528,24 @@ void MainWindow::loadDssatConfig(const QString &dssatDir)
     m_cropCombo->blockSignals(true);
     m_cropCombo->clear();
 
+    // Build display name — append model suffix when multiple crops share the same name
     QList<QPair<QString, QString>> entries; // display, key
+    QMap<QString, int> nameCount;
+    for (auto it = m_crops.begin(); it != m_crops.end(); ++it) {
+        const CropInfo &info = it.value();
+        QString desc = info.description;
+        int dash = desc.indexOf('-');
+        if (dash >= 0) desc = desc.mid(dash + 1).trimmed();
+        nameCount[desc]++;
+    }
     for (auto it = m_crops.begin(); it != m_crops.end(); ++it) {
         const CropInfo &info = it.value();
         QString desc = info.description;
         int dash = desc.indexOf('-');
         if (dash >= 0) desc = desc.mid(dash + 1).trimmed();
         QString display = desc;
+        if (nameCount[desc] > 1 && !info.module.isEmpty())
+            display = QString("%1 (%2)").arg(desc, info.module);
         entries.append({display, it.key()});
     }
     std::sort(entries.begin(), entries.end(),

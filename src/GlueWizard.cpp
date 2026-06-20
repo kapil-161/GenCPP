@@ -267,10 +267,9 @@ void GlueWizard::setupRunPage()
     outBox->setFixedWidth(160);
     QVBoxLayout *outCol = new QVBoxLayout(outBox);
     outCol->setSpacing(4);
-    m_outCoeffBtn = new QPushButton("Cultivar\nCoefficients");
+    m_outCoeffBtn = new QPushButton("Cultivar Coefficients");
     m_outDevBtn   = new QPushButton("Development");
     m_outYieldBtn = new QPushButton("Growth and Yield");
-    m_outCoeffBtn->setWordWrap(true);
     for (auto *b : {m_outCoeffBtn, m_outDevBtn, m_outYieldBtn}) {
         b->setEnabled(false);
         b->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);

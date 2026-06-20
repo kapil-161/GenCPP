@@ -16,6 +16,8 @@
 #include <QDateTime>
 #include <QRegularExpression>
 #include <QFont>
+#include <QGuiApplication>
+#include <QClipboard>
 
 static const QString GLUE_DIR       = "C:/DSSAT48/Tools/GLUE";
 static const QString GLUE_WORK      = "C:/DSSAT48/GLWork";
@@ -273,7 +275,16 @@ void GlueWizard::setupRunPage()
         QLineEdit *lineEdit = new QLineEdit(culLine);
         lineEdit->setReadOnly(true);
         lineEdit->setFont(QFont("Courier New", 9));
-        vl->addWidget(lineEdit);
+        QPushButton *copyBtn = new QPushButton("\xF0\x9F\x93\x8B"); // clipboard emoji
+        copyBtn->setFixedSize(28, 28);
+        copyBtn->setToolTip("Copy to clipboard");
+        connect(copyBtn, &QPushButton::clicked, this, [culLine]() {
+            QGuiApplication::clipboard()->setText(culLine);
+        });
+        QHBoxLayout *lineRow = new QHBoxLayout;
+        lineRow->addWidget(lineEdit, 1);
+        lineRow->addWidget(copyBtn);
+        vl->addLayout(lineRow);
         QLabel *hint = new QLabel("Click \"Apply to CUL File\" to replace the current cultivar row and save.");
         hint->setWordWrap(true);
         vl->addWidget(hint);

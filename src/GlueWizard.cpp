@@ -252,6 +252,7 @@ void GlueWizard::scanExperiments()
         int cultivarNum = -1;
         bool inCulSection = false;
         int cuCol = -1; // column index of INGENO in the header
+        int crCol = -1; // column index of CR in the header
 
         for (const QString &line : allLines) {
             QString trimmed = line.trimmed();
@@ -265,9 +266,9 @@ void GlueWizard::scanExperiments()
             if (inCulSection) {
                 if (trimmed.startsWith('*')) { inCulSection = false; continue; }
                 if (trimmed.startsWith("@C")) {
-                    // Find which token index is INGENO
                     QStringList hdrs = trimmed.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
                     cuCol = hdrs.indexOf("INGENO");
+                    crCol = hdrs.indexOf("CR");
                     continue;
                 }
                 if (trimmed.startsWith('@')) continue;
@@ -275,6 +276,10 @@ void GlueWizard::scanExperiments()
 
                 QStringList parts = trimmed.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
                 if (parts.size() <= cuCol) continue;
+                // Verify CR matches crop code to avoid cross-crop false matches
+                if (crCol >= 0 && crCol < parts.size() &&
+                    parts[crCol].compare(m_cropInfo.cropCode, Qt::CaseInsensitive) != 0)
+                    continue;
                 if (parts[cuCol].compare(m_cultivarId, Qt::CaseInsensitive) == 0) {
                     cultivarNum = parts[0].toInt();
                     break;

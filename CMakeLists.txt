@@ -169,11 +169,3 @@ elseif(APPLE)
         MACOSX_BUNDLE_SHORT_VERSION_STRING "1.0"
     )
 endif()
-
-add_executable(Tester test_parse.cpp src/CulParser.cpp)
-target_link_libraries(Tester Qt6::Core Qt6::Widgets)
-set_target_properties(Tester PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
-
-add_executable(TestFormat test_format.cpp src/CulParser.cpp)
-target_link_libraries(TestFormat Qt6::Core Qt6::Widgets)
-set_target_properties(TestFormat PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)

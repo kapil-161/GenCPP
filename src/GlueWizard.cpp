@@ -247,14 +247,17 @@ void GlueWizard::setupRunPage()
     connect(m_stopGlueBtn, &QPushButton::clicked, this, &GlueWizard::onStopGlue);
     connect(m_startOverBtn, &QPushButton::clicked, this, &GlueWizard::onStartOver);
 
-    // Output buttons open the result files
+    // Output buttons open result files (generated after GLUE run)
     connect(m_outCoeffBtn, &QPushButton::clicked, this, [this]() {
-        QProcess::startDetached("notepad", {GLUE_WORK + "/OptimalParameterSet.txt"});
+        // PosteriorDistribution_2.txt has Mean/STDEV/MaxProbability for each parameter
+        QProcess::startDetached("notepad", {GLUE_WORK + "/PosteriorDistribution_2.txt"});
     });
     connect(m_outDevBtn, &QPushButton::clicked, this, [this]() {
-        QProcess::startDetached("notepad", {GLUE_WORK + "/Evaluate_output.txt"});
+        // ModelRunIndicator.txt has phenology/development summary
+        QProcess::startDetached("notepad", {GLUE_WORK + "/ModelRunIndicator.txt"});
     });
     connect(m_outYieldBtn, &QPushButton::clicked, this, [this]() {
+        // EvaluateFrame_2.txt has simulated vs observed for all treatments
         QProcess::startDetached("notepad", {GLUE_WORK + "/EvaluateFrame_2.txt"});
     });
 

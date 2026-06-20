@@ -220,89 +220,129 @@ void GlueWizard::setupRunPage()
 }
 
 // ── Scan experiments ──────────────────────────────────────────────────────────
-// Experiment files end with X (e.g. .WHX .MZX .ALX .SBX).
-// Treatments are in the *TREATMENTS section, identified by a header line
-// starting with @N and containing TNAME. Treatment number is the first token;
-// TNAME is fixed-width at column 9, 25 chars wide.
+// For each experiment file (*X):
+//   1. Parse *CULTIVARS section: find the 6-digit cultivar ID -> get its @C number
+//   2. Parse *TREATMENTS section: find treatments where CU column == that @C number
+//   3. List only those matching treatments
 void GlueWizard::scanExperiments()
 {
     m_tree->clear();
 
-    // Use cropCode + "X" as the extension (e.g. MZ -> MZX, WH -> WHX)
     QString xExt = m_cropInfo.cropCode + "X";
     QDirIterator it(m_cropInfo.expDir,
                     QStringList() << "*." + xExt << "*." + xExt.toLower(),
                     QDir::Files,
                     QDirIterator::Subdirectories);
+
     while (it.hasNext()) {
         QString filePath = it.next();
 
         QFile f(filePath);
         if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) continue;
 
-        QTextStream in(&f);
-        bool inTreatSection = false;
-        bool cultivarFound  = false;
-        QStringList treatments;
         QStringList allLines;
-
-        while (!in.atEnd()) {
-            allLines << in.readLine();
-        }
+        QTextStream in(&f);
+        while (!in.atEnd()) allLines << in.readLine();
         f.close();
 
-        // First pass: check if cultivar ID appears anywhere in the file
-        for (const QString &line : allLines) {
-            if (line.contains(m_cultivarId, Qt::CaseInsensitive)) {
-                cultivarFound = true;
-                break;
-            }
-        }
-        if (!cultivarFound) continue;
+        // ── Step 1: find cultivar number from *CULTIVARS section ──────────────
+        // Header: @C CR INGENO CNAME
+        // Data:    1 LU LU0001 Rex
+        // We look for m_cultivarId (6-digit) in INGENO column (col index 2)
+        int cultivarNum = -1;
+        bool inCulSection = false;
+        int cuCol = -1; // column index of INGENO in the header
 
-        // Second pass: parse treatments from *TREATMENTS section
         for (const QString &line : allLines) {
             QString trimmed = line.trimmed();
-            if (trimmed.isEmpty() || trimmed.startsWith('!'))
-                continue;
+            if (trimmed.isEmpty() || trimmed.startsWith('!')) continue;
 
-            // Treatments header: @N ... TNAME ...
-            if (trimmed.startsWith("@N") && trimmed.contains("TNAME", Qt::CaseInsensitive)) {
-                inTreatSection = true;
+            if (trimmed.startsWith("*CULTIVAR")) {
+                inCulSection = true;
+                cuCol = -1;
                 continue;
             }
-
-            if (inTreatSection) {
-                // New section header ends treatments block
-                if (trimmed.startsWith('@') || trimmed.startsWith('*')) {
-                    inTreatSection = false;
+            if (inCulSection) {
+                if (trimmed.startsWith('*')) { inCulSection = false; continue; }
+                if (trimmed.startsWith("@C")) {
+                    // Find which token index is INGENO
+                    QStringList hdrs = trimmed.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+                    cuCol = hdrs.indexOf("INGENO");
                     continue;
                 }
-                // Treatment number: first token; TNAME: fixed-width col 9, 25 chars
-                QStringList parts = trimmed.split(' ', Qt::SkipEmptyParts);
-                if (parts.isEmpty()) continue;
-                bool ok;
-                parts[0].toInt(&ok);
-                if (!ok) continue;
+                if (trimmed.startsWith('@')) continue;
+                if (cuCol < 0) continue;
 
-                QString tname;
-                if (line.length() > 9)
-                    tname = line.mid(9, 25).trimmed();
-                if (tname.isEmpty())
-                    tname = parts.mid(1).join(" ");
-
-                treatments << QString("[%1] %2").arg(parts[0], tname);
+                QStringList parts = trimmed.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+                if (parts.size() <= cuCol) continue;
+                if (parts[cuCol].compare(m_cultivarId, Qt::CaseInsensitive) == 0) {
+                    cultivarNum = parts[0].toInt();
+                    break;
+                }
             }
         }
 
-        if (treatments.isEmpty()) continue;
+        if (cultivarNum < 0) continue; // cultivar not in this file
+
+        // ── Step 2: find CU column index from *TREATMENTS header ──────────────
+        // Header: @N R O C TNAME.................... CU FL SA ...
+        // Data:    1 1 0 0 Rex_24C                    1  1  0 ...
+        QStringList matchingTreatments;
+        bool inTrtSection = false;
+        int cuTrtCol = -1; // token index of CU in treatment data line
+        int tnameStart = -1; // character position of TNAME in the header line
+
+        for (const QString &line : allLines) {
+            QString trimmed = line.trimmed();
+            if (trimmed.isEmpty() || trimmed.startsWith('!')) continue;
+
+            if (trimmed.startsWith("*TREATMENT")) {
+                inTrtSection = true;
+                cuTrtCol = -1;
+                continue;
+            }
+            if (inTrtSection) {
+                if (trimmed.startsWith('*')) { inTrtSection = false; continue; }
+
+                if (trimmed.startsWith("@N")) {
+                    // Find character position of TNAME and token index of CU
+                    tnameStart = line.indexOf("TNAME");
+                    QStringList hdrs = trimmed.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+                    cuTrtCol = hdrs.indexOf("CU");
+                    continue;
+                }
+                if (trimmed.startsWith('@')) continue;
+                if (cuTrtCol < 0 || tnameStart < 0) continue;
+
+                QStringList parts = trimmed.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+                if (parts.size() <= cuTrtCol) continue;
+
+                bool ok;
+                int trtNum = parts[0].toInt(&ok);
+                if (!ok) continue;
+
+                int cuVal = parts[cuTrtCol].toInt();
+                if (cuVal != cultivarNum) continue;
+
+                // Extract TNAME by character position (25 chars wide)
+                QString tname;
+                if (line.length() > tnameStart)
+                    tname = line.mid(tnameStart, 25).trimmed();
+                if (tname.isEmpty())
+                    tname = parts.value(4); // fallback
+
+                matchingTreatments << QString("[%1] %2").arg(trtNum).arg(tname);
+            }
+        }
+
+        if (matchingTreatments.isEmpty()) continue;
 
         QTreeWidgetItem *parent = new QTreeWidgetItem(m_tree);
         parent->setText(0, filePath);
         parent->setCheckState(0, Qt::Unchecked);
         parent->setExpanded(true);
 
-        for (const QString &tr : treatments) {
+        for (const QString &tr : matchingTreatments) {
             QTreeWidgetItem *child = new QTreeWidgetItem(parent);
             child->setText(0, tr);
             child->setCheckState(0, Qt::Unchecked);

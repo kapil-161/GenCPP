@@ -469,7 +469,7 @@ void GlueWizard::onRunGlue()
         else if (line.startsWith("EcotypeCalibration,"))
             line = QString("EcotypeCalibration,%1").arg(ecoCalib);
         else if (line.startsWith("CultivarBatchFile,"))
-            line = QString("CultivarBatchFile,%1.MZC").arg(m_cultivarId);
+            line = QString("CultivarBatchFile,%1.%2C").arg(m_cultivarId, m_cropInfo.cropCode);
     }
 
     QFile scOut(simCtrlPath);
@@ -534,11 +534,18 @@ void GlueWizard::onGlueFinished(int exitCode)
 {
     m_runGlueBtn->setEnabled(true);
     m_stopGlueBtn->setEnabled(false);
-    if (exitCode == 0) {
+
+    QString log = m_logEdit->toPlainText();
+    bool hasError = log.contains("error occurred", Qt::CaseInsensitive) ||
+                    log.contains("cannot open", Qt::CaseInsensitive) ||
+                    log.contains("Error in ", Qt::CaseInsensitive) ||
+                    exitCode != 0;
+
+    if (!hasError) {
         m_logEdit->append("\n✓ GLUE calibration finished successfully.");
         for (auto *b : {m_outCoeffBtn, m_outDevBtn, m_outYieldBtn})
             b->setEnabled(true);
     } else {
-        m_logEdit->append(QString("\n✗ GLUE exited with code %1.").arg(exitCode));
+        m_logEdit->append(QString("\n✗ GLUE encountered errors (exit code %1). Check log above.").arg(exitCode));
     }
 }

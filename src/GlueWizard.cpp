@@ -465,7 +465,7 @@ void GlueWizard::scanExperiments()
                 if (line.length() > tnameStart)
                     tname = line.mid(tnameStart, 25).trimmed();
                 if (tname.isEmpty())
-                    tname = parts.value(4); // fallback
+                    tname = line.trimmed().split(QRegularExpression("\\s+"), Qt::SkipEmptyParts).value(4);
 
                 matchingTreatments << QString("[%1] %2").arg(trtNum).arg(tname);
             }

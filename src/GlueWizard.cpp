@@ -17,10 +17,29 @@
 #include <QRegularExpression>
 #include <QFont>
 
-static const QString GLUE_DIR    = "C:/DSSAT48/Tools/GLUE";
-static const QString GLUE_WORK   = "C:/DSSAT48/GLWork";
+static const QString GLUE_DIR       = "C:/DSSAT48/Tools/GLUE";
+static const QString GLUE_WORK      = "C:/DSSAT48/GLWork";
 static const QString BACKUP_DEFAULT = "C:/DSSAT48/GLWork/BackUp";
-static const QString R_TERM      = "C:/PROGRA~1/R/R-45~1.2/bin/x64/RTerm.exe";
+
+static QString findRTerm()
+{
+    // Try versions from newest to oldest
+    QStringList versions = {"R-4.6.0","R-4.5.3","R-4.5.2","R-4.5.1","R-4.4.2","R-4.4.1","R-4.3.3"};
+    QStringList bases = {"C:/Program Files/R", "C:/PROGRA~1/R"};
+    for (const QString &base : bases) {
+        for (const QString &ver : versions) {
+            QString path = base + "/" + ver + "/bin/x64/RTerm.exe";
+            if (QFileInfo::exists(path)) return path;
+        }
+        // Also try any installed version via directory scan
+        QDir rBase(base);
+        for (const QString &d : rBase.entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+            QString path = base + "/" + d + "/bin/x64/RTerm.exe";
+            if (QFileInfo::exists(path)) return path;
+        }
+    }
+    return "RTerm.exe"; // fallback to PATH
+}
 
 GlueWizard::GlueWizard(const CropInfo &cropInfo,
                        const QString &cultivarId,
@@ -514,6 +533,8 @@ void GlueWizard::onRunGlue()
             line = QString("EcotypeCalibration,%1").arg(ecoCalib);
         else if (line.startsWith("CultivarBatchFile,"))
             line = QString("CultivarBatchFile,%1.%2C").arg(m_cultivarId, m_cropInfo.cropCode);
+        else if (line.startsWith("ModelID,"))
+            line = QString("ModelID,%1").arg(m_cropInfo.module);
     }
 
     QFile scOut(simCtrlPath);
@@ -539,7 +560,10 @@ void GlueWizard::onRunGlue()
     connect(m_glueProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
             this, [this](int code, QProcess::ExitStatus){ onGlueFinished(code); });
 
-    m_glueProcess->start(R_TERM, {"--slave", "--file=" + GLUE_DIR + "/GLUE.r"});
+    // Launch exactly as Glue.bat does: RTerm --slave < GLUE.r
+    QString rterm = findRTerm();
+    m_logEdit->append(QString("Using R: %1").arg(rterm));
+    m_glueProcess->start("cmd.exe", {"/c", rterm + " --slave < \"" + GLUE_DIR + "/GLUE.r\""});
 
     m_runGlueBtn->setEnabled(false);
     m_stopGlueBtn->setEnabled(true);

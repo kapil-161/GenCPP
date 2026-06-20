@@ -178,14 +178,17 @@ QString CulParser::formatRow(const CulRow &row, const QVector<ParamFormat> &form
     int actualParams = std::max(numParams, static_cast<int>(row.params.size()));
 
     for (int i = 0; i < actualParams; ++i) {
+        double v = (i < row.params.size() && row.params[i].has_value()) ? row.params[i].value() : 0.0;
+        ParamFormat fmt = (i < formats.size()) ? formats[i] : ParamFormat();
+        // If this cell has its own stored string, derive decimal precision from it
+        // (e.g. GLUE-applied values like "39.80" should not be rounded to "40")
         if (i < row.paramStrs.size() && !row.paramStrs[i].isEmpty()) {
-            double v = (i < row.params.size() && row.params[i].has_value()) ? row.params[i].value() : 0.0;
-            line += formatParam(v, (i < formats.size()) ? formats[i] : ParamFormat());
-        } else {
-            // Edited, modified, or appended values
-            double v = (i < row.params.size() && row.params[i].has_value()) ? row.params[i].value() : 0.0;
-            line += formatParam(v, (i < formats.size()) ? formats[i] : ParamFormat());
+            QString s = row.paramStrs[i].trimmed();
+            int dotIdx = s.indexOf('.');
+            if (dotIdx >= 0)
+                fmt.decimals = s.length() - dotIdx - 1;
         }
+        line += formatParam(v, fmt);
     }
     return line;
 }

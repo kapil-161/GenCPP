@@ -239,7 +239,7 @@ bool CulTableModel::setData(const QModelIndex &index, const QVariant &value, int
                 double v = str.toDouble(&ok);
                 if (!ok) return false;
                 row.params[p] = std::optional<double>(v);
-                row.paramStrs[p] = ""; // Clear so it gets dynamically formatted
+                row.paramStrs[p] = str; // Preserve string so decimal precision is kept on write
             }
         } else return false;
     }

@@ -180,6 +180,17 @@ void MainWindow::setupUI()
     topGrid->addWidget(new QLabel("Crop:"), 1, 0);
     m_cropCombo = new QComboBox;
     m_cropCombo->setMinimumWidth(280);
+    {
+        // Multi-column popup: wrap items into columns so all crops fit on screen
+        QListView *popupView = new QListView(m_cropCombo);
+        popupView->setViewMode(QListView::ListMode);
+        popupView->setFlow(QListView::TopToBottom);
+        popupView->setWrapping(true);
+        popupView->setResizeMode(QListView::Adjust);
+        popupView->setUniformItemSizes(true);
+        popupView->setMinimumWidth(560);  // wide enough for ~4 columns
+        m_cropCombo->setView(popupView);
+    }
     topGrid->addWidget(m_cropCombo, 1, 1);
     topGrid->setColumnStretch(1, 1);
 

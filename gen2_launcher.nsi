@@ -25,27 +25,9 @@ Section
     RMDir /r "$TEMP\Gen2_runtime"
 
     SetOutPath "$TEMP\Gen2_runtime"
-    File "manual_deployment\GeneticsEditor.exe"
-    File "manual_deployment\Qt6Core.dll"
-    File "manual_deployment\Qt6Gui.dll"
-    File "manual_deployment\Qt6Widgets.dll"
-
-    ; MinGW runtime DLLs (present if not fully static-linked)
-    IfFileExists "manual_deployment\libgcc_s_seh-1.dll"  0 +2
-        File "manual_deployment\libgcc_s_seh-1.dll"
-    IfFileExists "manual_deployment\libstdc++-6.dll"     0 +2
-        File "manual_deployment\libstdc++-6.dll"
-    IfFileExists "manual_deployment\libwinpthread-1.dll" 0 +2
-        File "manual_deployment\libwinpthread-1.dll"
-
-    SetOutPath "$TEMP\Gen2_runtime\platforms"
-    File "manual_deployment\platforms\qwindows.dll"
-
-    SetOutPath "$TEMP\Gen2_runtime\resources"
-    File "manual_deployment\resources\final.ico"
+    File /r "manual_deployment\*.*"
 
     ; Write version marker so future launches skip re-extraction
-    SetOutPath "$TEMP\Gen2_runtime"
     FileOpen $0 "$TEMP\Gen2_runtime\version_${VERSION}.marker" w
     FileClose $0
 

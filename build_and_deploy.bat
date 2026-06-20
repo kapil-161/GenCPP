@@ -135,17 +135,9 @@ if defined QUIET_MODE (
 )
 if %ERRORLEVEL% neq 0 ( echo ERROR: windeployqt failed! & pause & exit /b 1 )
 
-REM ── Step 6: Remove unnecessary files ─────────────────────────────────────────
+REM ── Step 6: Remove truly unnecessary files ────────────────────────────────────
 if not defined QUIET_MODE echo.
 if not defined QUIET_MODE echo Step 6: Removing unnecessary files...
-if exist manual_deployment\generic          rmdir /s /q manual_deployment\generic
-if exist manual_deployment\iconengines      rmdir /s /q manual_deployment\iconengines
-if exist manual_deployment\imageformats     rmdir /s /q manual_deployment\imageformats
-if exist manual_deployment\networkinformation rmdir /s /q manual_deployment\networkinformation
-if exist manual_deployment\styles           rmdir /s /q manual_deployment\styles
-if exist manual_deployment\tls              rmdir /s /q manual_deployment\tls
-if exist manual_deployment\Qt6Network.dll   del manual_deployment\Qt6Network.dll
-if exist manual_deployment\Qt6Svg.dll       del manual_deployment\Qt6Svg.dll
 if exist manual_deployment\D3Dcompiler_47.dll del manual_deployment\D3Dcompiler_47.dll
 if exist manual_deployment\opengl32sw.dll   del manual_deployment\opengl32sw.dll
 

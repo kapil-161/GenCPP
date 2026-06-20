@@ -22,19 +22,17 @@ static const QString GLUE_WORK   = "C:/DSSAT48/GLWork";
 static const QString BACKUP_DEFAULT = "C:/DSSAT48/GLWork/BackUp";
 static const QString R_TERM      = "C:/PROGRA~1/R/R-45~1.2/bin/x64/RTerm.exe";
 
-GlueWizard::GlueWizard(const QString &dssatDir,
-                       const QString &cropCode,
+GlueWizard::GlueWizard(const CropInfo &cropInfo,
                        const QString &cultivarId,
                        const QString &cultivarName,
                        QWidget *parent)
     : QDialog(parent)
-    , m_dssatDir(dssatDir)
-    , m_cropCode(cropCode)
+    , m_cropInfo(cropInfo)
     , m_cultivarId(cultivarId)
     , m_cultivarName(cultivarName)
 {
     setWindowTitle(QString("Run GLUE — %1 / %2 %3")
-                   .arg(cropCode, cultivarId, cultivarName));
+                   .arg(cropInfo.cropCode, cultivarId, cultivarName));
     setMinimumSize(620, 480);
 
     m_stack = new QStackedWidget(this);
@@ -58,7 +56,7 @@ void GlueWizard::setupTreatmentPage()
     QLabel *title = new QLabel(
         QString("<b>Select Treatments to Include</b><br>"
                 "<small>Crop: %1 &nbsp; Cultivar: %2 %3</small>")
-        .arg(m_cropCode, m_cultivarId, m_cultivarName));
+        .arg(m_cropInfo.cropCode, m_cultivarId, m_cultivarName));
     vbox->addWidget(title);
 
     QHBoxLayout *content = new QHBoxLayout;
@@ -230,13 +228,14 @@ void GlueWizard::scanExperiments()
 {
     m_tree->clear();
 
-    // Match all files whose extension ends with X (case-insensitive)
-    QDirIterator it(m_dssatDir, QDir::Files, QDirIterator::Subdirectories);
+    // Use cropCode + "X" as the extension (e.g. MZ -> MZX, WH -> WHX)
+    QString xExt = m_cropInfo.cropCode + "X";
+    QDirIterator it(m_cropInfo.expDir,
+                    QStringList() << "*." + xExt << "*." + xExt.toLower(),
+                    QDir::Files,
+                    QDirIterator::Subdirectories);
     while (it.hasNext()) {
         QString filePath = it.next();
-        QString ext = QFileInfo(filePath).suffix();
-        if (ext.isEmpty() || !ext.endsWith('X', Qt::CaseInsensitive))
-            continue;
 
         QFile f(filePath);
         if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) continue;
@@ -312,7 +311,8 @@ void GlueWizard::scanExperiments()
 
     if (m_tree->topLevelItemCount() == 0) {
         QTreeWidgetItem *item = new QTreeWidgetItem(m_tree);
-        item->setText(0, QString("(No experiments found for cultivar: %1)").arg(m_cultivarId));
+        item->setText(0, QString("(No experiments found for cultivar %1 in %2)")
+                         .arg(m_cultivarId, m_cropInfo.expDir));
         item->setFlags(item->flags() & ~Qt::ItemIsUserCheckable);
         m_goBtn->setEnabled(false);
     }

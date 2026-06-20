@@ -14,14 +14,14 @@
 #include <QTextEdit>
 #include <QProcess>
 #include <QStringList>
+#include "DssatProParser.h"
 
 class GlueWizard : public QDialog
 {
     Q_OBJECT
 
 public:
-    explicit GlueWizard(const QString &dssatDir,
-                        const QString &cropCode,
+    explicit GlueWizard(const CropInfo &cropInfo,
                         const QString &cultivarId,
                         const QString &cultivarName,
                         QWidget *parent = nullptr);
@@ -46,10 +46,9 @@ private:
     QStringList selectedTreatmentFiles();
 
     // Data
-    QString m_dssatDir;
-    QString m_cropCode;
-    QString m_cultivarId;
-    QString m_cultivarName;
+    CropInfo m_cropInfo;
+    QString  m_cultivarId;
+    QString  m_cultivarName;
 
     // Pages
     QStackedWidget *m_stack;

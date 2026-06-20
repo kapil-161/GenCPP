@@ -273,8 +273,7 @@ void MainWindow::setupCulTab(QWidget *tab)
         QModelIndex srcIdx = m_culProxy->mapToSource(idx);
         QString varNum = m_culModel->data(m_culModel->index(srcIdx.row(), CulTableModel::COL_VARNUM)).toString().trimmed();
         QString vrName = m_culModel->data(m_culModel->index(srcIdx.row(), CulTableModel::COL_VRNAME)).toString().trimmed();
-        GlueWizard *wizard = new GlueWizard(m_dssatDirEdit->text().trimmed(),
-                                             m_currentCropCode, varNum, vrName, this);
+        GlueWizard *wizard = new GlueWizard(m_crops[m_currentCropCode], varNum, vrName, this);
         wizard->setAttribute(Qt::WA_DeleteOnClose);
         wizard->exec();
     });

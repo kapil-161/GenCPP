@@ -74,6 +74,7 @@ set(SOURCES
     src/BackupManager.cpp
     src/SpeGraphWidget.cpp
     src/GlueWizard.cpp
+    src/CommandLineHandler.cpp
 )
 
 # Header files
@@ -93,6 +94,7 @@ set(HEADERS
     include/BackupManager.h
     include/SpeGraphWidget.h
     include/GlueWizard.h
+    include/CommandLineHandler.h
 )
 
 # Add version resource for Windows
@@ -159,9 +161,10 @@ add_custom_command(TARGET GeneticsEditor POST_BUILD
     ${CMAKE_SOURCE_DIR}/resources ${CMAKE_BINARY_DIR}/bin/resources
 )
 
-# Windows: no console window
+# Windows: keep as console app so --test/--glue can write to stdout.
+# The GUI path calls FreeConsole() at startup to hide the window.
 if(WIN32)
-    set_target_properties(GeneticsEditor PROPERTIES WIN32_EXECUTABLE TRUE)
+    # WIN32_EXECUTABLE removed intentionally — console needed for CLI mode
 elseif(APPLE)
     set_target_properties(GeneticsEditor PROPERTIES
         MACOSX_BUNDLE TRUE

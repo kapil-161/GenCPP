@@ -11,9 +11,23 @@
 #include "MainWindow.h"
 #include "Config.h"
 #include "SingleInstanceApp.h"
+#include "CommandLineHandler.h"
 
 int main(int argc, char *argv[])
 {
+    // Handle CLI modes (--test, --glue) before creating GUI
+    {
+        QCoreApplication cliApp(argc, argv);
+        CommandLineHandler handler;
+        int code = handler.run(cliApp.arguments());
+        if (code >= 0) return code; // CLI mode handled — exit without GUI
+    }
+
+    // Hide console window when launched as GUI (no CLI flags)
+#ifdef Q_OS_WIN
+    FreeConsole();
+#endif
+
     SingleInstanceApp app(argc, argv);
 
     if (!app.isFirstInstance()) {

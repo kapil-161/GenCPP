@@ -213,6 +213,17 @@ void GlueWizard::setupRunPage()
     centerCol->addWidget(m_stopGlueBtn);
     centerCol->addWidget(m_startOverBtn);
 
+    m_progressLabel = new QLabel("Ready");
+    m_progressLabel->setAlignment(Qt::AlignCenter);
+    centerCol->addWidget(m_progressLabel);
+
+    m_progressBar = new QProgressBar;
+    m_progressBar->setRange(0, 100);
+    m_progressBar->setValue(0);
+    m_progressBar->setTextVisible(true);
+    m_progressBar->setFormat("%v% — %p%");
+    centerCol->addWidget(m_progressBar);
+
     m_logEdit = new QTextEdit;
     m_logEdit->setReadOnly(true);
     m_logEdit->setFont(QFont("Courier New", 8));
@@ -563,15 +574,29 @@ void GlueWizard::onRunGlue()
     QString rterm = findRTerm();
     m_glueProcess->start(rterm, {"--slave", "--file=" + GLUE_DIR + "/GLUE.r"});
 
+    // Reset progress tracking
+    m_totalRuns = m_runsSpin->value();
+    m_glueRound = 0;
+    m_lastIndicatorLine = 0;
+    m_progressBar->setValue(0);
+    m_progressLabel->setText("Starting GLUE...");
+
+    // Poll process.txt every 500ms for per-run progress
+    m_pollTimer = new QTimer(this);
+    connect(m_pollTimer, &QTimer::timeout, this, &GlueWizard::onPollProgress);
+    m_pollTimer->start(500);
+
     m_runGlueBtn->setEnabled(false);
     m_stopGlueBtn->setEnabled(true);
 }
 
 void GlueWizard::onStopGlue()
 {
+    if (m_pollTimer) { m_pollTimer->stop(); m_pollTimer->deleteLater(); m_pollTimer = nullptr; }
     if (m_glueProcess && m_glueProcess->state() != QProcess::NotRunning) {
         m_glueProcess->kill();
         m_logEdit->append("\n[Stopped by user]");
+        m_progressLabel->setText("Stopped");
     }
 }
 
@@ -596,8 +621,48 @@ void GlueWizard::onGlueOutput()
     if (!err.isEmpty()) m_logEdit->append(QString::fromLocal8Bit(err).trimmed());
 }
 
+void GlueWizard::onPollProgress()
+{
+    // Read process.txt — contains percentage 0-100 for current round
+    QString procFile = GLUE_WORK + "/process.txt";
+    QFile f(procFile);
+    if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QString val = QString::fromLatin1(f.readAll()).trimmed();
+        f.close();
+        bool ok = false;
+        double pct = val.toDouble(&ok);
+        if (ok) {
+            // GLUE runs 2 rounds; map round+pct to 0-100 overall
+            int overall = (int)((m_glueRound * 100 + pct) / 2.0);
+            m_progressBar->setValue(qMin(overall, 99));
+            int runsThisRound = (int)(pct / 100.0 * m_totalRuns);
+            m_progressLabel->setText(QString("Round %1/2 — %2 / %3 simulations (%4%)")
+                .arg(m_glueRound + 1).arg(runsThisRound).arg(m_totalRuns).arg((int)pct));
+        }
+    }
+
+    // Also read new lines from ModelRunIndicator.txt for round transitions
+    QString indFile = GLUE_WORK + "/ModelRunIndicator.txt";
+    QFile fi(indFile);
+    if (fi.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QStringList lines = QString::fromLatin1(fi.readAll()).split('\n');
+        fi.close();
+        for (int i = m_lastIndicatorLine; i < lines.size(); ++i) {
+            QString line = lines[i].trimmed();
+            if (line.isEmpty()) continue;
+            if (line.startsWith("GLUE Flag: 2")) {
+                m_glueRound = 1;
+            } else if (line.contains("round of GLUE is finished")) {
+                // round finished
+            }
+        }
+        m_lastIndicatorLine = lines.size();
+    }
+}
+
 void GlueWizard::onGlueFinished(int exitCode)
 {
+    if (m_pollTimer) { m_pollTimer->stop(); m_pollTimer->deleteLater(); m_pollTimer = nullptr; }
     m_runGlueBtn->setEnabled(true);
     m_stopGlueBtn->setEnabled(false);
 
@@ -608,10 +673,13 @@ void GlueWizard::onGlueFinished(int exitCode)
                     exitCode != 0;
 
     if (!hasError) {
+        m_progressBar->setValue(100);
+        m_progressLabel->setText(QString("Done — %1 simulations complete").arg(m_totalRuns));
         m_logEdit->append("\n✓ GLUE calibration finished successfully.");
         for (auto *b : {m_outCoeffBtn, m_outDevBtn, m_outYieldBtn})
             b->setEnabled(true);
     } else {
+        m_progressLabel->setText("Failed — see log");
         m_logEdit->append(QString("\n✗ GLUE encountered errors (exit code %1). Check log above.").arg(exitCode));
     }
 }

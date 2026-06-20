@@ -14,6 +14,8 @@
 #include <QTextEdit>
 #include <QProcess>
 #include <QStringList>
+#include <QProgressBar>
+#include <QTimer>
 #include "DssatProParser.h"
 
 class GlueWizard : public QDialog
@@ -37,6 +39,7 @@ private slots:
     void onStartOver();
     void onGlueOutput();
     void onGlueFinished(int exitCode);
+    void onPollProgress();
 
 private:
     void setupTreatmentPage();
@@ -76,10 +79,16 @@ private:
     QPushButton  *m_outDevBtn;
     QPushButton  *m_outYieldBtn;
     QTextEdit    *m_logEdit;
+    QProgressBar *m_progressBar;
+    QLabel       *m_progressLabel;
 
     // Process
     QProcess     *m_glueProcess = nullptr;
+    QTimer       *m_pollTimer   = nullptr;
     QStringList   m_selectedFiles;
+    int           m_lastIndicatorLine = 0;
+    int           m_totalRuns = 0;
+    int           m_glueRound = 0;
 };
 
 #endif // GLUEWIZARD_H

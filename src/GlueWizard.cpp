@@ -560,10 +560,8 @@ void GlueWizard::onRunGlue()
     connect(m_glueProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
             this, [this](int code, QProcess::ExitStatus){ onGlueFinished(code); });
 
-    // Launch exactly as Glue.bat does: RTerm --slave < GLUE.r
     QString rterm = findRTerm();
-    m_logEdit->append(QString("Using R: %1").arg(rterm));
-    m_glueProcess->start("cmd.exe", {"/c", rterm + " --slave < \"" + GLUE_DIR + "/GLUE.r\""});
+    m_glueProcess->start(rterm, {"--slave", "--file=" + GLUE_DIR + "/GLUE.r"});
 
     m_runGlueBtn->setEnabled(false);
     m_stopGlueBtn->setEnabled(true);

@@ -170,7 +170,8 @@ QString CulParser::formatRow(const CulRow &row, const QVector<ParamFormat> &form
     line += row.varNum.leftJustified(6, ' ');
     line += ' ';
     line += row.vrName.leftJustified(16, ' '); // strict A16 (positions 7-22)
-    line += row.expNo.leftJustified(7, ' ');   // 7-char experiment region (positions 23-29)
+    // 7X region: 6-char content right-justified + mandatory space at pos 29
+    line += row.expNo.trimmed().rightJustified(6, ' ') + ' ';
     line += row.ecoNum.leftJustified(6, ' ');  // strict A6 (positions 30-35)
 
     int actualParams = std::max(numParams, static_cast<int>(row.params.size()));

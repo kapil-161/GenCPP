@@ -182,26 +182,9 @@ void MainWindow::setupUI()
     topGrid->addWidget(m_cropCombo, 1, 1);
     topGrid->setColumnStretch(1, 1);
 
-    topGrid->addWidget(new QLabel("File:"), 2, 0);
-    QHBoxLayout *fileBtnLayout = new QHBoxLayout;
-    fileBtnLayout->setSpacing(6);
-    m_culFileBtn = new QPushButton("CUL");
-    m_ecoFileBtn = new QPushButton("ECO");
-    m_speFileBtn = new QPushButton("SPE");
-    for (auto *b : {m_culFileBtn, m_ecoFileBtn, m_speFileBtn}) {
-        b->setEnabled(false);
-        b->setFixedWidth(60);
-        b->setCheckable(true);
-        fileBtnLayout->addWidget(b);
-    }
-    fileBtnLayout->addStretch();
-    QWidget *fileBtnWidget = new QWidget;
-    fileBtnWidget->setLayout(fileBtnLayout);
-    topGrid->addWidget(fileBtnWidget, 2, 1);
-
     m_geneticsLabel = new QLabel("—");
     m_geneticsLabel->setStyleSheet("color: #555; font-size: 10px;");
-    topGrid->addWidget(m_geneticsLabel, 3, 0, 1, 3);
+    topGrid->addWidget(m_geneticsLabel, 2, 0, 1, 3);
 
     // Replace placeholder
     auto *placeholderItem = vbox->takeAt(0);
@@ -411,9 +394,12 @@ void MainWindow::connectSignals()
     connect(m_browseButton, &QPushButton::clicked, this, &MainWindow::onOpenDssatDir);
     connect(m_cropCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &MainWindow::onCropChanged);
-    connect(m_culFileBtn, &QPushButton::clicked, this, [this](){ loadFileType("CUL"); });
-    connect(m_ecoFileBtn, &QPushButton::clicked, this, [this](){ loadFileType("ECO"); });
-    connect(m_speFileBtn, &QPushButton::clicked, this, [this](){ loadFileType("SPE"); });
+    connect(m_tabWidget, &QTabWidget::currentChanged, this, [this](int index){
+        if (m_currentCropCode.isEmpty()) return;
+        if (index == 0 && !m_currentCulPath.isEmpty()) loadFileType("CUL");
+        else if (index == 1 && !m_currentEcoPath.isEmpty()) loadFileType("ECO");
+        else if (index == 2 && !m_currentSpePath.isEmpty()) loadFileType("SPE");
+    });
 
     // CUL
     connect(m_culAddBtn,      &QPushButton::clicked, this, &MainWindow::onCulAdd);
@@ -515,27 +501,16 @@ void MainWindow::loadCrop(const QString &cropCode)
     m_currentEcoPath  = info.ecoFile;
     m_currentSpePath  = info.speFile;
 
-    // Enable buttons only for files that exist on disk
-    m_culFileBtn->setEnabled(QFileInfo::exists(info.culFile));
-    m_ecoFileBtn->setEnabled(QFileInfo::exists(info.ecoFile));
-    m_speFileBtn->setEnabled(QFileInfo::exists(info.speFile));
+    m_geneticsLabel->setText("File: —");
 
-    m_culFileBtn->setChecked(false);
-    m_ecoFileBtn->setChecked(false);
-    m_speFileBtn->setChecked(false);
+    setStatus(QString("Selected crop: %1 (%2)").arg(info.cropCode, cropCode));
 
-    m_geneticsLabel->setText(
-        QString("File: —")
-    );
-
-    setStatus(QString("Selected crop: %1 (%2) — choose CUL, ECO or SPE").arg(info.cropCode, cropCode));
-
-    // Auto-load CUL if available
-    if (m_culFileBtn->isEnabled())
+    // Auto-load whichever file is available, starting with CUL
+    if (QFileInfo::exists(info.culFile))
         loadFileType("CUL");
-    else if (m_ecoFileBtn->isEnabled())
+    else if (QFileInfo::exists(info.ecoFile))
         loadFileType("ECO");
-    else if (m_speFileBtn->isEnabled())
+    else if (QFileInfo::exists(info.speFile))
         loadFileType("SPE");
 }
 
@@ -543,11 +518,6 @@ void MainWindow::loadFileType(const QString &fileType)
 {
     if (m_currentCropCode.isEmpty() || !m_crops.contains(m_currentCropCode)) return;
     const CropInfo &info = m_crops[m_currentCropCode];
-
-    // Highlight the active button
-    m_culFileBtn->setChecked(fileType == "CUL");
-    m_ecoFileBtn->setChecked(fileType == "ECO");
-    m_speFileBtn->setChecked(fileType == "SPE");
 
     if (fileType == "CUL") {
         m_culHeaderLines.clear();

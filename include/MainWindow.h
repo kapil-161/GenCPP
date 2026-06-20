@@ -96,9 +96,6 @@ private:
     QLineEdit  *m_dssatDirEdit;
     QPushButton *m_browseButton;
     QComboBox  *m_cropCombo;
-    QPushButton *m_culFileBtn;
-    QPushButton *m_ecoFileBtn;
-    QPushButton *m_speFileBtn;
     QLabel     *m_geneticsLabel;
 
     // Tab widget

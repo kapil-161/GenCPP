@@ -249,8 +249,48 @@ void GlueWizard::setupRunPage()
 
     // Output buttons open result files (generated after GLUE run)
     connect(m_outCoeffBtn, &QPushButton::clicked, this, [this]() {
-        // PosteriorDistribution_2.txt has Mean/STDEV/MaxProbability for each parameter
-        QProcess::startDetached("notepad", {GLUE_WORK + "/PosteriorDistribution_2.txt"});
+        // GLUE writes the calibrated cultivar line to "LU<culId> <culName>.CUL" in GLWork
+        QString culFileName = QString("%1%2 %3.CUL")
+            .arg(m_cropInfo.cropCode, m_cultivarId, m_cultivarName.trimmed().left(16).trimmed());
+        QString culFilePath = GLUE_WORK + "/" + culFileName;
+
+        if (!QFileInfo::exists(culFilePath)) {
+            QMessageBox::warning(this, "File Not Found",
+                QString("Calibrated cultivar file not found:\n%1\n\nRun GLUE first.").arg(culFilePath));
+            return;
+        }
+
+        QFile f(culFilePath);
+        if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) return;
+        QString culLine = QString::fromLatin1(f.readAll()).trimmed();
+        f.close();
+
+        QDialog dlg(this);
+        dlg.setWindowTitle("Calibrated Cultivar Coefficients");
+        dlg.resize(700, 150);
+        QVBoxLayout *vl = new QVBoxLayout(&dlg);
+        vl->addWidget(new QLabel("GLUE calibrated cultivar line (MaxProbability parameters):"));
+        QLineEdit *lineEdit = new QLineEdit(culLine);
+        lineEdit->setReadOnly(true);
+        lineEdit->setFont(QFont("Courier New", 9));
+        vl->addWidget(lineEdit);
+        QLabel *hint = new QLabel("Click \"Apply to CUL File\" to replace the current cultivar row and save.");
+        hint->setWordWrap(true);
+        vl->addWidget(hint);
+        QHBoxLayout *hl = new QHBoxLayout;
+        QPushButton *applyBtn = new QPushButton("Apply to CUL File");
+        applyBtn->setStyleSheet("font-weight:bold; background:#2196F3; color:white;");
+        QPushButton *cancelBtn = new QPushButton("Close");
+        hl->addStretch();
+        hl->addWidget(applyBtn);
+        hl->addWidget(cancelBtn);
+        vl->addLayout(hl);
+        connect(cancelBtn, &QPushButton::clicked, &dlg, &QDialog::reject);
+        connect(applyBtn, &QPushButton::clicked, &dlg, [&dlg, culLine, this]() {
+            emit cultivarCalibrated(culLine);
+            dlg.accept();
+        });
+        dlg.exec();
     });
     connect(m_outDevBtn, &QPushButton::clicked, this, [this]() {
         // ModelRunIndicator.txt has phenology/development summary

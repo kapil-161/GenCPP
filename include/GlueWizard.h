@@ -28,6 +28,9 @@ public:
                         const QString &cultivarName,
                         QWidget *parent = nullptr);
 
+signals:
+    void cultivarCalibrated(const QString &culLine);
+
 private slots:
     void onGoFromTreatments();
     void onBackToTreatments();

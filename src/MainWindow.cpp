@@ -273,8 +273,25 @@ void MainWindow::setupCulTab(QWidget *tab)
         QModelIndex srcIdx = m_culProxy->mapToSource(idx);
         QString varNum = m_culModel->data(m_culModel->index(srcIdx.row(), CulTableModel::COL_VARNUM)).toString().trimmed();
         QString vrName = m_culModel->data(m_culModel->index(srcIdx.row(), CulTableModel::COL_VRNAME)).toString().trimmed();
+        int culRow = srcIdx.row();
         GlueWizard *wizard = new GlueWizard(m_crops[m_currentCropCode], varNum, vrName, this);
         wizard->setAttribute(Qt::WA_DeleteOnClose);
+        connect(wizard, &GlueWizard::cultivarCalibrated, this, [this, culRow, varNum](const QString &culLine) {
+            // Parse calibrated params from GLUE's CUL line
+            // Line format: VARNUM(6) SP VRNAME(16) EXPNO_REGION(7) ECONUM(6) SP params...
+            // Total fixed prefix = 6+1+16+7+6+1 = 37 chars
+            QString paramStr = culLine.mid(37).trimmed();
+            QStringList vals = paramStr.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+            int nParams = m_culModel->columnCount() - CulTableModel::COL_PARAM0;
+            for (int i = 0; i < qMin(vals.size(), nParams); ++i) {
+                bool ok = false;
+                double v = vals[i].toDouble(&ok);
+                if (ok)
+                    m_culModel->setData(m_culModel->index(culRow, CulTableModel::COL_PARAM0 + i), v);
+            }
+            QMessageBox::information(this, "GLUE Applied",
+                QString("Calibrated parameters applied to %1.\nClick Save to write to the CUL file.").arg(varNum));
+        });
         wizard->exec();
     });
 

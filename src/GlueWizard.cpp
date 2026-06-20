@@ -183,7 +183,7 @@ void GlueWizard::setupRunPage()
     grid->addWidget(new QLabel("Runs:"), 0, 0);
     m_runsSpin = new QSpinBox;
     m_runsSpin->setRange(100, 1000000);
-    m_runsSpin->setValue(20000);
+    m_runsSpin->setValue(100);
     m_runsSpin->setSingleStep(1000);
     grid->addWidget(m_runsSpin, 0, 1);
 

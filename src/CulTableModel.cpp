@@ -222,7 +222,7 @@ bool CulTableModel::setData(const QModelIndex &index, const QVariant &value, int
     switch (col) {
     case COL_VARNUM: row.varNum = value.toString().left(6); break;
     case COL_VRNAME: row.vrName = value.toString().left(13); break;
-    case COL_EXPNO:  row.expNo  = value.toString().left(1); break;
+    case COL_EXPNO:  row.expNo  = value.toString().left(7).leftJustified(7, ' '); break;
     case COL_ECONUM: row.ecoNum = value.toString().left(6); break;
     default: {
         int p = col - COL_PARAM0;
@@ -257,7 +257,7 @@ void CulTableModel::addRow(const QString &vrName)
     CulRow r;
     r.varNum  = generateUniqueVarNum();
     r.vrName  = vrName;
-    r.expNo   = " ";
+    r.expNo   = "       "; // 7-char region, blank for new rows
     r.ecoNum  = "DFAULT";
     r.params  = QVector<std::optional<double>>(m_paramNames.size());
     r.paramStrs = QVector<QString>(m_paramNames.size(), "");

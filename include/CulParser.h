@@ -22,8 +22,8 @@ struct ParamFormat {
 
 struct CulRow {
     QString varNum;                              // 6 chars   (positions 0-5)
-    QString vrName;                              // 13 chars  (positions 7-19)
-    QString expNo;                               // 1 char    (position 20); '.' for MINIMA/MAXIMA
+    QString vrName;                              // 16 chars  (positions 7-22)
+    QString expNo;                               // 7 chars   (positions 23-29); e.g. "   1,6 " or "      ."
     QString ecoNum;                              // 6 chars   (positions 30-35)
     QVector<std::optional<double>> params;       // dynamic values
     QVector<QString> paramStrs;                  // Original unparsed strings for exact reproduction

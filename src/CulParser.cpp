@@ -136,9 +136,8 @@ QVector<CulRow> CulParser::parse(const QString &filePath, QStringList &headerLin
         row.varNum = line.left(6).trimmed();
         row.vrName = line.mid(7, 16).trimmed();
 
-        // Position 23 to 29 is the 7X region, typically containing the EXPNO at the end
-        QString expStr = line.mid(23, 7).trimmed();
-        row.expNo = expStr.isEmpty() ? "." : expStr.right(1);
+        // Positions 23-29: 7-char experiment region (e.g. "   1,6 " or "      6")
+        row.expNo = line.mid(23, 7);
 
         // Extract ECO# from strictly position 30-35 (A6)
         row.ecoNum = line.mid(30, 6).trimmed();
@@ -170,10 +169,9 @@ QString CulParser::formatRow(const CulRow &row, const QVector<ParamFormat> &form
     QString line;
     line += row.varNum.leftJustified(6, ' ');
     line += ' ';
-    line += row.vrName.leftJustified(16, ' '); // strict A16
-    line += "      ";                          // first 6 chars of 7X region
-    line += row.expNo.rightJustified(1, ' ');  // last char of 7X region
-    line += row.ecoNum.leftJustified(6, ' ');  // strict A6 starting at index 30
+    line += row.vrName.leftJustified(16, ' '); // strict A16 (positions 7-22)
+    line += row.expNo.leftJustified(7, ' ');   // 7-char experiment region (positions 23-29)
+    line += row.ecoNum.leftJustified(6, ' ');  // strict A6 (positions 30-35)
 
     int actualParams = std::max(numParams, static_cast<int>(row.params.size()));
 
@@ -247,8 +245,7 @@ CulRow CulParser::parseLine(const QString &rawLine)
     
     if (!row.ecoNum.isEmpty()) {
         row.vrName = line.mid(7, 16).trimmed();
-        QString expStr = line.mid(23, 7).trimmed();
-        row.expNo = expStr.isEmpty() ? "." : expStr.right(1);
+        row.expNo = line.mid(23, 7); // preserve full 7-char experiment region
         
         // Parameters from position 36
         QString paramStr = line.mid(36);

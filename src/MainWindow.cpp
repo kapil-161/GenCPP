@@ -188,7 +188,7 @@ void MainWindow::setupUI()
         popupView->setWrapping(true);
         popupView->setResizeMode(QListView::Adjust);
         popupView->setUniformItemSizes(true);
-        popupView->setMinimumWidth(560);  // wide enough for ~4 columns
+        popupView->setMinimumWidth(640);  // 4 cols x ~160px (longest name: "Bambara groundnut")
         m_cropCombo->setView(popupView);
     }
     topGrid->addWidget(m_cropCombo, 1, 1);

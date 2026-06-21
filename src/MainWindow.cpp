@@ -24,7 +24,9 @@ public:
 #include "SpeEditor.h"
 #include "SpeSyntaxHighlighter.h"
 #include "Config.h"
-#include "GlueWizard.h"
+#include "GlueQueueDialog.h"
+#include "GlueQueueManager.h"
+#include "GlueQueuePanel.h"
 #include <QApplication>
 #include <QMenuBar>
 #include <QStatusBar>
@@ -51,6 +53,9 @@ public:
 #include <QAbstractTextDocumentLayout>
 #include <QTimer>
 #include <QDebug>
+#include <QSet>
+#include <QDirIterator>
+#include <QRegularExpression>
 #include <algorithm>
 #include <memory>
 #include <QRegularExpression>
@@ -60,7 +65,29 @@ class CulSortProxy : public QSortFilterProxyModel {
 public:
     explicit CulSortProxy(QObject *parent = nullptr)
         : QSortFilterProxyModel(parent) {}
+
+    void setUsedFilter(const QSet<QString> &usedVarNums) {
+        m_usedVarNums = usedVarNums;
+        m_filterActive = !usedVarNums.isEmpty();
+        invalidateFilter();
+    }
+
+    void clearUsedFilter() {
+        m_usedVarNums.clear();
+        m_filterActive = false;
+        invalidateFilter();
+    }
+
 protected:
+    bool filterAcceptsRow(int sourceRow, const QModelIndex &sourceParent) const override {
+        if (m_filterActive) {
+            QString varNum = sourceModel()->data(sourceModel()->index(sourceRow, 0, sourceParent)).toString().trimmed();
+            if (varNum != "999991" && varNum != "999992" && !m_usedVarNums.contains(varNum))
+                return false;
+        }
+        return QSortFilterProxyModel::filterAcceptsRow(sourceRow, sourceParent);
+    }
+
     bool lessThan(const QModelIndex &left, const QModelIndex &right) const override {
         // VAR# is always column 0 in the source model
         const QString lv = sourceModel()->data(sourceModel()->index(left.row(),  0)).toString();
@@ -75,6 +102,10 @@ protected:
         }
         return QSortFilterProxyModel::lessThan(left, right);
     }
+
+private:
+    QSet<QString> m_usedVarNums;
+    bool          m_filterActive = false;
 };
 
 class EcoSortProxy : public QSortFilterProxyModel {
@@ -273,6 +304,8 @@ static QPushButton *makeBtn(const QString &text, const QString &objName = {})
 
 void MainWindow::setupCulTab(QWidget *tab)
 {
+    m_glueQueue = new GlueQueueManager(this);
+
     QVBoxLayout *vbox = new QVBoxLayout(tab);
     vbox->setContentsMargins(4, 4, 4, 4);
 
@@ -289,49 +322,40 @@ void MainWindow::setupCulTab(QWidget *tab)
     m_culDelBtn      = makeBtn("Delete",    "dangerBtn");
     m_culDupBtn      = makeBtn("Duplicate");
     m_culSaveBtn     = makeBtn("Save",      "saveBtn");
-    m_culExportBtn   = makeBtn("Export CSV");
-    m_culImportBtn   = makeBtn("Import CSV");
-    m_culValidateBtn = makeBtn("Validate");
+    m_culRefreshBtn = makeBtn("Refresh");
+    m_culShowUsedBtn = makeBtn("Show Used");
+    m_culShowUsedBtn->setCheckable(true);
+    m_culShowUsedBtn->setToolTip("Show only cultivars used in experiment files");
     QPushButton *culGlueBtn = makeBtn("Paste GLUE");
     culGlueBtn->setToolTip("Paste a GLUE-calibrated cultivar line to update or add a row");
     connect(culGlueBtn, &QPushButton::clicked, this, &MainWindow::onCulPasteGlue);
 
-    QPushButton *runGlueBtn = makeBtn("Run GLUE");
-    runGlueBtn->setToolTip("Launch GLUE calibration for the selected cultivar");
-    runGlueBtn->setStyleSheet("font-weight:bold; background:#2196F3; color:white;");
-    connect(runGlueBtn, &QPushButton::clicked, this, [this]() {
+    m_culGlueQueueBtn = makeBtn("Run GLUE");
+    QPushButton *addQueueBtn = m_culGlueQueueBtn;
+    addQueueBtn->setToolTip("Select treatments and add this cultivar to the GLUE calibration queue");
+    addQueueBtn->setStyleSheet("font-weight:bold; background:#2196F3; color:white;");
+    connect(addQueueBtn, &QPushButton::clicked, this, [this]() {
         QModelIndex idx = m_culView->currentIndex();
         if (!idx.isValid()) {
-            QMessageBox::warning(this, "Run GLUE", "Please select a cultivar row first.");
+            QMessageBox::warning(this, "GLUE Queue", "Please select a cultivar row first.");
             return;
         }
         QModelIndex srcIdx = m_culProxy->mapToSource(idx);
         QString varNum = m_culModel->data(m_culModel->index(srcIdx.row(), CulTableModel::COL_VARNUM)).toString().trimmed();
         QString vrName = m_culModel->data(m_culModel->index(srcIdx.row(), CulTableModel::COL_VRNAME)).toString().trimmed();
-        int culRow = srcIdx.row();
-        GlueWizard *wizard = new GlueWizard(m_crops[m_currentCropCode], varNum, vrName, this);
-        wizard->setAttribute(Qt::WA_DeleteOnClose);
-        connect(wizard, &GlueWizard::cultivarCalibrated, this, [this, culRow, varNum](const QString &culLine) {
-            // Parse calibrated params from GLUE's CUL line
-            // Line format: VARNUM(6) SP VRNAME(16) EXPNO_REGION(7) ECONUM(6) SP params...
-            // Total fixed prefix = 6+1+16+7+6+1 = 37 chars
-            QString paramStr = culLine.mid(37).trimmed();
-            QStringList vals = paramStr.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
-            int nParams = m_culModel->columnCount() - CulTableModel::COL_PARAM0;
-            for (int i = 0; i < qMin(vals.size(), nParams); ++i) {
-                bool ok = false;
-                double v = vals[i].toDouble(&ok);
-                if (ok)
-                    m_culModel->setData(m_culModel->index(culRow, CulTableModel::COL_PARAM0 + i), v);
-            }
-            QMessageBox::information(this, "GLUE Applied",
-                QString("Calibrated parameters applied to %1.\nClick Save to write to the CUL file.").arg(varNum));
-        });
-        wizard->exec();
+        if (varNum == "999991" || varNum == "999992") {
+            QMessageBox::warning(this, "GLUE Queue", "Cannot run GLUE on MINIMA/MAXIMA rows.");
+            return;
+        }
+        GlueQueueDialog dlg(m_crops[m_currentCropCode], varNum, vrName, this);
+        if (dlg.exec() == QDialog::Accepted) {
+            m_glueQueue->addEntry(dlg.result());
+            m_culGlueQueueBtn->setText("Add to GLUE Queue");
+        }
     });
 
     for (auto *b : {m_culAddBtn, m_culDelBtn, m_culDupBtn, m_culSaveBtn,
-                    m_culExportBtn, m_culImportBtn, m_culValidateBtn, culGlueBtn, runGlueBtn})
+                    m_culRefreshBtn, m_culShowUsedBtn, culGlueBtn, addQueueBtn})
         toolbar->addWidget(b);
 
     vbox->addLayout(toolbar);
@@ -350,7 +374,51 @@ void MainWindow::setupCulTab(QWidget *tab)
     m_culView->verticalHeader()->setDefaultSectionSize(22);
     m_culView->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_culView->setSortingEnabled(true);
-    vbox->addWidget(m_culView, 1);
+
+    // Queue panel below table in a splitter
+    m_gluePanel = new GlueQueuePanel(m_glueQueue, tab);
+    m_gluePanel->setMaximumHeight(160);
+
+    QSplitter *splitter = new QSplitter(Qt::Vertical, tab);
+    splitter->addWidget(m_culView);
+    splitter->addWidget(m_gluePanel);
+    splitter->setStretchFactor(0, 3);
+    splitter->setStretchFactor(1, 1);
+    vbox->addWidget(splitter, 1);
+
+    // Auto-apply calibrated results to CUL model
+    connect(m_glueQueue, &GlueQueueManager::entryFinished,
+            this, [this](int index, bool success, const QString &culLine) {
+        if (!success || culLine.isEmpty()) {
+            setStatus(QString("GLUE failed for entry %1").arg(index + 1), true);
+            return;
+        }
+        const GlueQueueEntry &entry = m_glueQueue->entries().at(index);
+        QString varNum = entry.cultivarId;
+
+        // Find the row in the model
+        int culRow = -1;
+        const auto &rows = m_culModel->rows();
+        for (int i = 0; i < rows.size(); ++i) {
+            if (rows[i].varNum.trimmed() == varNum) { culRow = i; break; }
+        }
+        if (culRow < 0) {
+            setStatus(QString("GLUE done for %1 but cultivar not found in table").arg(varNum), true);
+            return;
+        }
+
+        // Parse and apply params — fixed-width: VARNUM(6) SP VRNAME(16) EXPNO(7) ECO(6) SP params
+        QString paramStr = culLine.mid(37).trimmed();
+        QStringList vals = paramStr.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+        int nParams = m_culModel->columnCount() - CulTableModel::COL_PARAM0;
+        for (int i = 0; i < qMin(vals.size(), nParams); ++i) {
+            bool ok = false;
+            double v = vals[i].toDouble(&ok);
+            if (ok)
+                m_culModel->setData(m_culModel->index(culRow, CulTableModel::COL_PARAM0 + i), v);
+        }
+        setStatus(QString("GLUE calibration applied to %1 — click Save to write to file.").arg(varNum));
+    });
 
     new QShortcut(QKeySequence::Copy, m_culView, this, &MainWindow::onCulCopyRow);
 }
@@ -476,9 +544,8 @@ void MainWindow::connectSignals()
     connect(m_culDelBtn,      &QPushButton::clicked, this, &MainWindow::onCulDelete);
     connect(m_culDupBtn,      &QPushButton::clicked, this, &MainWindow::onCulDuplicate);
     connect(m_culSaveBtn,     &QPushButton::clicked, this, &MainWindow::onCulSave);
-    connect(m_culExportBtn,   &QPushButton::clicked, this, &MainWindow::onCulExportCsv);
-    connect(m_culImportBtn,   &QPushButton::clicked, this, &MainWindow::onCulImportCsv);
-    connect(m_culValidateBtn, &QPushButton::clicked, this, &MainWindow::onCulValidate);
+    connect(m_culRefreshBtn,  &QPushButton::clicked, this, &MainWindow::onCulRefresh);
+    connect(m_culShowUsedBtn, &QPushButton::toggled, this, &MainWindow::onCulShowUsed);
     connect(m_culSearch,      &QLineEdit::textChanged, this, &MainWindow::onCulSearch);
     connect(m_culModel,       &CulTableModel::dataModified,
             [this](){ m_culDirty = true; setStatus("CUL modified…"); m_autoSaveTimer->start(); });
@@ -584,6 +651,14 @@ void MainWindow::loadCrop(const QString &cropCode)
 
     m_geneticsLabel->setText("File: —");
 
+    // Reset "Show Used" toggle when crop changes
+    m_culShowUsedBtn->blockSignals(true);
+    m_culShowUsedBtn->setChecked(false);
+    m_culShowUsedBtn->setText("Show Used");
+    m_culShowUsedBtn->blockSignals(false);
+    m_culProxy->clearUsedFilter();
+    if (m_culGlueQueueBtn) m_culGlueQueueBtn->setText("Run GLUE");
+
     setStatus(QString("Selected crop: %1 (%2)").arg(info.cropCode, cropCode));
 
     // Auto-load whichever file is available, starting with CUL
@@ -611,6 +686,60 @@ void MainWindow::loadFileType(const QString &fileType)
         m_culDirty = false;
         m_tabWidget->setCurrentIndex(0);
         setStatus(QString("Loaded CUL: %1 — %2 cultivars").arg(QFileInfo(m_currentCulPath).fileName()).arg(culRows.size()));
+
+        if (!m_currentEcoPath.isEmpty() && m_ecoModel->rows().isEmpty()) {
+            m_ecoHeaderLines.clear();
+            m_ecoModel->setRows(EcoParser::parse(m_currentEcoPath, m_ecoHeaderLines));
+            m_ecoModel->setColumnTooltips(CulParser::tooltipsFromHeader(m_ecoHeaderLines));
+            m_ecoDirty = false;
+            refreshEcoCrossRef();
+        }
+
+        // Default to "Show Used" filter — silently, only if experiment files exist
+        {
+            const CropInfo &ci = m_crops.value(m_currentCropCode);
+            QString xExt = ci.cropCode + "X";
+            QDirIterator scanIt(ci.expDir,
+                                QStringList() << "*." + xExt << "*." + xExt.toLower(),
+                                QDir::Files, QDirIterator::Subdirectories);
+            QSet<QString> usedVarNums;
+            while (scanIt.hasNext()) {
+                QFile f(scanIt.next());
+                if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) continue;
+                QTextStream in(&f);
+                bool inCulSection = false;
+                int cuCol = -1, crCol = -1;
+                while (!in.atEnd()) {
+                    QString line = in.readLine();
+                    QString trimmed = line.trimmed();
+                    if (trimmed.isEmpty() || trimmed.startsWith('!')) continue;
+                    if (trimmed.startsWith("*CULTIVAR")) { inCulSection = true; cuCol = -1; continue; }
+                    if (!inCulSection) continue;
+                    if (trimmed.startsWith('*')) { inCulSection = false; continue; }
+                    if (trimmed.startsWith("@C")) {
+                        QStringList hdrs = trimmed.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+                        cuCol = hdrs.indexOf("INGENO");
+                        crCol = hdrs.indexOf("CR");
+                        continue;
+                    }
+                    if (trimmed.startsWith('@') || cuCol < 0) continue;
+                    QStringList parts = trimmed.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+                    if (parts.size() <= cuCol) continue;
+                    if (crCol >= 0 && crCol < parts.size() &&
+                        parts[crCol].compare(ci.cropCode, Qt::CaseInsensitive) != 0) continue;
+                    usedVarNums.insert(parts[cuCol].trimmed());
+                }
+            }
+            if (!usedVarNums.isEmpty()) {
+                m_culProxy->setUsedFilter(usedVarNums);
+                m_culShowUsedBtn->blockSignals(true);
+                m_culShowUsedBtn->setChecked(true);
+                m_culShowUsedBtn->setText("Show All");
+                m_culShowUsedBtn->blockSignals(false);
+                setStatus(QString("Loaded CUL: %1 — showing %2 cultivar(s) used in experiments.")
+                              .arg(QFileInfo(m_currentCulPath).fileName()).arg(usedVarNums.size()));
+            }
+        }
     } else if (fileType == "ECO") {
         m_ecoHeaderLines.clear();
         QVector<EcoRow> ecoRows = EcoParser::parse(m_currentEcoPath, m_ecoHeaderLines);
@@ -871,92 +1000,36 @@ void MainWindow::onCulPasteGlue()
     }
 }
 
-void MainWindow::onCulExportCsv()
+
+void MainWindow::onCulRefresh()
 {
-    QString path = QFileDialog::getSaveFileName(this, "Export CUL as CSV", {}, "CSV (*.csv)");
-    if (path.isEmpty()) return;
-
-    QFile f(path);
-    if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        setStatus("Cannot write: " + path, true); return;
-    }
-    QTextStream out(&f);
-
-    // Header
-    QStringList cols;
-    for (int c = 0; c < m_culModel->columnCount(); ++c)
-        cols << m_culModel->columnName(c);
-    out << cols.join(",") << "\n";
-
-    // Rows
-    const auto &rows = m_culModel->rows();
-    for (const auto &row : rows) {
-        QStringList vals;
-        vals << row.varNum << row.vrName << row.expNo << row.ecoNum;
-        for (const auto &opt : row.params) {
-            if (opt.has_value())
-                vals << QString::number(opt.value());
-            else
-                vals << "";
-        }
-        out << vals.join(",") << "\n";
-    }
-    setStatus("Exported: " + path);
-}
-
-void MainWindow::onCulImportCsv()
-{
-    QString path = QFileDialog::getOpenFileName(this, "Import CSV into CUL", {}, "CSV (*.csv)");
-    if (path.isEmpty()) return;
-
-    QFile f(path);
-    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        setStatus("Cannot read: " + path, true); return;
+    // Reload CUL
+    if (!m_currentCulPath.isEmpty()) {
+        m_culHeaderLines.clear();
+        QVector<CulRow> culRows = CulParser::parse(m_currentCulPath, m_culHeaderLines);
+        QStringList paramNames = CulParser::extractParamNames(m_culHeaderLines);
+        m_culModel->setParamNames(paramNames.isEmpty() ? CUL_PARAM_NAMES : paramNames);
+        m_culModel->setRows(culRows);
+        m_culModel->setColumnTooltips(CulParser::tooltipsFromHeader(m_culHeaderLines));
+        m_culModel->setCalibrationTypes(CulParser::calibrationTypes(m_culHeaderLines));
+        m_culDirty = false;
     }
 
-    QTextStream in(&f);
-    QString headerLine = in.readLine();   // skip header
-    Q_UNUSED(headerLine);
-
-    int imported = 0;
-    while (!in.atEnd()) {
-        QString line = in.readLine().trimmed();
-        if (line.isEmpty()) continue;
-        QStringList parts = line.split(',');
-        if (parts.size() < 4) continue;
-
-        CulRow row;
-        row.varNum = parts[0].left(6).trimmed();
-        row.vrName = parts[1].left(13).trimmed();
-        row.expNo  = parts[2].left(1).trimmed();
-        row.ecoNum = parts[3].left(6).trimmed();
-        int numParams = m_culModel->columnCount() - CulTableModel::COL_PARAM0;
-        for (int i = 4; i < parts.size() && row.params.size() < numParams; ++i) {
-            row.params << parts[i].toDouble();
-            row.paramStrs << parts[i].trimmed();
-        }
-        while (row.params.size() < numParams) {
-            row.params << 0.0;
-            row.paramStrs << "";
-        }
-
-        // Check if varNum already exists -> overwrite, else add
-        m_culModel->addRow();
-        QVector<CulRow> updatedRows = m_culModel->rows();
-        updatedRows.last() = row;
-        m_culModel->setRows(updatedRows);
-        ++imported;
+    // Reload ECO
+    if (!m_currentEcoPath.isEmpty()) {
+        m_ecoHeaderLines.clear();
+        m_ecoModel->setRows(EcoParser::parse(m_currentEcoPath, m_ecoHeaderLines));
+        m_ecoModel->setColumnTooltips(CulParser::tooltipsFromHeader(m_ecoHeaderLines));
+        m_ecoDirty = false;
+        refreshEcoCrossRef();
     }
-    setStatus(QString("Imported %1 rows from CSV").arg(imported));
-    m_culDirty = true;
-}
 
-void MainWindow::onCulValidate()
-{
+    setStatus("Refreshed CUL and ECO from disk.");
+
+    // Validate
     const auto &rows = m_culModel->rows();
     QStringList issues;
 
-    // Get ECO# set for cross-reference
     QStringList ecoNums;
     for (const auto &er : m_ecoModel->rows())
         if (!er.isMinMax) ecoNums << er.ecoNum;
@@ -972,7 +1045,6 @@ void MainWindow::onCulValidate()
             issues << row.varNum + ": ECO# '" + row.ecoNum + "' not found in ECO file";
 
         for (int i = 0; i < row.params.size(); ++i) {
-            // Basic NaN/Inf check
             if (row.params[i].has_value()) {
                 double v = row.params[i].value();
                 if (!std::isfinite(v))
@@ -982,12 +1054,12 @@ void MainWindow::onCulValidate()
     }
 
     if (issues.isEmpty()) {
-        QMessageBox::information(this, "Validation", "All checks passed — no issues found.");
+        QMessageBox::information(this, "Refresh", "Files reloaded — no issues found.");
     } else {
         QString msg = QString("%1 issue(s) found:\n\n").arg(issues.size());
         msg += issues.mid(0, 50).join("\n");
         if (issues.size() > 50) msg += "\n… and more";
-        QMessageBox::warning(this, "Validation Issues", msg);
+        QMessageBox::warning(this, "Refresh — Issues Found", msg);
     }
 }
 
@@ -995,6 +1067,71 @@ void MainWindow::onCulSearch(const QString &text)
 {
     if (m_culProxy)
         m_culProxy->setFilterFixedString(text);
+}
+
+void MainWindow::onCulShowUsed(bool checked)
+{
+    if (!checked) {
+        m_culProxy->clearUsedFilter();
+        m_culShowUsedBtn->setText("Show Used");
+        setStatus("Showing all cultivars.");
+        return;
+    }
+
+    const CropInfo &info = m_crops.value(m_currentCropCode);
+    if (info.expDir.isEmpty()) {
+        m_culShowUsedBtn->blockSignals(true);
+        m_culShowUsedBtn->setChecked(false);
+        m_culShowUsedBtn->blockSignals(false);
+        setStatus("No experiment directory configured — showing all cultivars.");
+        return;
+    }
+
+    QString xExt = info.cropCode + "X";
+    QDirIterator it(info.expDir,
+                    QStringList() << "*." + xExt << "*." + xExt.toLower(),
+                    QDir::Files, QDirIterator::Subdirectories);
+
+    QSet<QString> usedVarNums;
+    while (it.hasNext()) {
+        QFile f(it.next());
+        if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) continue;
+        QTextStream in(&f);
+        bool inCulSection = false;
+        int cuCol = -1, crCol = -1;
+        while (!in.atEnd()) {
+            QString line = in.readLine();
+            QString trimmed = line.trimmed();
+            if (trimmed.isEmpty() || trimmed.startsWith('!')) continue;
+            if (trimmed.startsWith("*CULTIVAR")) { inCulSection = true; cuCol = -1; continue; }
+            if (!inCulSection) continue;
+            if (trimmed.startsWith('*')) { inCulSection = false; continue; }
+            if (trimmed.startsWith("@C")) {
+                QStringList hdrs = trimmed.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+                cuCol = hdrs.indexOf("INGENO");
+                crCol = hdrs.indexOf("CR");
+                continue;
+            }
+            if (trimmed.startsWith('@') || cuCol < 0) continue;
+            QStringList parts = trimmed.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+            if (parts.size() <= cuCol) continue;
+            if (crCol >= 0 && crCol < parts.size() &&
+                parts[crCol].compare(info.cropCode, Qt::CaseInsensitive) != 0) continue;
+            usedVarNums.insert(parts[cuCol].trimmed());
+        }
+    }
+
+    if (usedVarNums.isEmpty()) {
+        m_culShowUsedBtn->blockSignals(true);
+        m_culShowUsedBtn->setChecked(false);
+        m_culShowUsedBtn->blockSignals(false);
+        setStatus("No cultivars found in experiment files — showing all.");
+        return;
+    }
+
+    m_culProxy->setUsedFilter(usedVarNums);
+    m_culShowUsedBtn->setText("Show All");
+    setStatus(QString("Showing %1 cultivar(s) used in experiments.").arg(usedVarNums.size()));
 }
 
 // ─── ECO actions ─────────────────────────────────────────────────────────────

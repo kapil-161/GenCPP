@@ -75,6 +75,9 @@ set(SOURCES
     src/SpeGraphWidget.cpp
     src/GlueWizard.cpp
     src/GlueRunner.cpp
+    src/GlueQueueManager.cpp
+    src/GlueQueueDialog.cpp
+    src/GlueQueuePanel.cpp
     src/CommandLineHandler.cpp
 )
 
@@ -96,6 +99,9 @@ set(HEADERS
     include/SpeGraphWidget.h
     include/GlueWizard.h
     include/GlueRunner.h
+    include/GlueQueueManager.h
+    include/GlueQueueDialog.h
+    include/GlueQueuePanel.h
     include/CommandLineHandler.h
 )
 

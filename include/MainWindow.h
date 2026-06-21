@@ -26,6 +26,8 @@
 #include "CulTableModel.h"
 #include "EcoTableModel.h"
 #include "SpeGraphWidget.h"
+#include "GlueQueueManager.h"
+#include "GlueQueuePanel.h"
 
 class MainWindow : public QMainWindow
 {
@@ -51,9 +53,8 @@ private slots:
     void onCulDelete();
     void onCulDuplicate();
     void onCulSave();
-    void onCulExportCsv();
-    void onCulImportCsv();
-    void onCulValidate();
+    void onCulRefresh();
+    void onCulShowUsed(bool checked);
     void onCulSearch(const QString &text);
     void onCulPasteGlue();
     void onCulCopyRow();
@@ -105,9 +106,10 @@ private:
     QLineEdit  *m_culSearch;
     QTableView *m_culView;
     CulTableModel *m_culModel;
-    QSortFilterProxyModel *m_culProxy = nullptr;
+    class CulSortProxy *m_culProxy = nullptr;
     QPushButton *m_culAddBtn, *m_culDelBtn, *m_culDupBtn;
-    QPushButton *m_culSaveBtn, *m_culExportBtn, *m_culImportBtn, *m_culValidateBtn;
+    QPushButton *m_culSaveBtn, *m_culRefreshBtn, *m_culShowUsedBtn;
+    QPushButton *m_culGlueQueueBtn = nullptr;
     bool        m_culDirty = false;
 
     // ECO tab
@@ -125,6 +127,10 @@ private:
     QPushButton *m_speSaveBtn;
     SpeGraphWidget *m_speGraphWidget;
     bool         m_speDirty = false;
+
+    // GLUE queue
+    GlueQueueManager *m_glueQueue = nullptr;
+    GlueQueuePanel   *m_gluePanel = nullptr;
 
     // Auto-save timer
     QTimer *m_autoSaveTimer = nullptr;

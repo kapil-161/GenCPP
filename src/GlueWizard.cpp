@@ -36,6 +36,7 @@ GlueWizard::GlueWizard(const CropInfo &cropInfo,
 {
     setWindowTitle(QString("Run GLUE — %1 / %2 %3")
                    .arg(cropInfo.cropCode, cultivarId, cultivarName));
+    setWindowFlags(windowFlags() | Qt::WindowMinimizeButtonHint);
     setMinimumSize(620, 360);
     resize(700, 400);
 

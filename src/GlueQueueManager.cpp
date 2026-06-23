@@ -114,7 +114,7 @@ void GlueQueueManager::runNext()
             this, [this](int code, QProcess::ExitStatus){ onGlueFinished(code); });
 
     QString rterm = GlueRunner::findRTerm();
-    m_process->start(rterm, {"--slave", "--file=" + GlueRunner::GLUE_DIR + "/GLUE.r"});
+    m_process->start(rterm, {"--slave", GlueRunner::GLUE_DIR + "/GLUE.r"});
 
     m_pollTimer = new QTimer(this);
     connect(m_pollTimer, &QTimer::timeout, this, &GlueQueueManager::onPollProgress);

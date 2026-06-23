@@ -26,10 +26,18 @@ struct ScanResult {
 class GlueRunner
 {
 public:
-    static const QString GLUE_DIR;
-    static const QString GLUE_WORK;
+    static QString GLUE_DIR;
+    static QString GLUE_WORK;
 
-    // Find RTerm.exe on the system
+    // Auto-detect GLUE_DIR from QSettings, common locations, or dssatProPath's DGL entry.
+    // Call once at startup. Returns true if GLUE_DIR was found.
+    static bool resolvePaths(const QString &dssatProPath = QString());
+
+    // Manually set GLUE_DIR (and derive GLUE_WORK from OutputD in SimulationControl.csv).
+    // Persists to QSettings.
+    static void setGlueDir(const QString &dir);
+
+    // Find RTerm.exe / Rscript on the system
     static QString findRTerm();
 
     // Scan experiment files for treatments matching the given cultivar.

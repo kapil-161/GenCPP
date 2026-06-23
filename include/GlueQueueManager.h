@@ -64,6 +64,7 @@ private:
     QTimer   *m_pollTimer     = nullptr;
     int       m_lastLine      = 0;
     int       m_glueRound     = 0;
+    QString   m_stderrBuf;
 };
 
 #endif // GLUEQUEUEMANAGER_H

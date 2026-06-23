@@ -24,6 +24,7 @@ public:
 #include "SpeEditor.h"
 #include "SpeSyntaxHighlighter.h"
 #include "Config.h"
+#include "GlueRunner.h"
 #include "GlueQueueDialog.h"
 #include "GlueQueueManager.h"
 #include "GlueQueuePanel.h"
@@ -184,6 +185,9 @@ MainWindow::MainWindow(QWidget *parent)
     // Auto-load DSSAT config
     if (QFile::exists(Config::DSSATPRO_FILE))
         loadDssatConfig(Config::DSSAT_BASE);
+
+    // Resolve GLUE paths (QSettings → common locations → DSSATPRO DGL entry)
+    GlueRunner::resolvePaths(Config::DSSATPRO_FILE);
 }
 
 MainWindow::~MainWindow() {}
@@ -286,6 +290,7 @@ void MainWindow::setupMenuBar()
 {
     QMenu *fileMenu = menuBar()->addMenu("&File");
     fileMenu->addAction("Open DSSAT directory…", this, &MainWindow::onOpenDssatDir);
+    fileMenu->addAction("Set GLUE directory…",   this, &MainWindow::onOpenGlueDir);
     fileMenu->addSeparator();
     fileMenu->addAction("E&xit", qApp, &QApplication::quit);
 
@@ -576,10 +581,11 @@ void MainWindow::loadDssatConfig(const QString &dssatDir)
 {
     m_dssatDirEdit->setText(dssatDir);
 
-    // Parse DSSATPRO
-    QString proPath = dssatDir + "/DSSATPRO.v48";
+    // Parse DSSATPRO — use the platform-specific file
 #ifdef Q_OS_WIN
-    proPath.replace('/', '\\');
+    QString proPath = dssatDir + "\\DSSATPRO.v48";
+#else
+    QString proPath = dssatDir + "/DSSATPRO.L48";
 #endif
 
     m_crops = DssatProParser::discoverCrops(proPath);
@@ -1428,6 +1434,21 @@ void MainWindow::onOpenDssatDir()
                                                     m_dssatDirEdit->text());
     if (!dir.isEmpty())
         loadDssatConfig(dir);
+}
+
+void MainWindow::onOpenGlueDir()
+{
+    QString dir = QFileDialog::getExistingDirectory(this, "Select GLUE software directory",
+                                                    GlueRunner::GLUE_DIR);
+    if (dir.isEmpty()) return;
+    if (!QFile::exists(dir + "/SimulationControl.csv")) {
+        QMessageBox::warning(this, "GLUE directory",
+            "SimulationControl.csv not found in:\n" + dir +
+            "\n\nPlease select the folder containing your GLUE R scripts.");
+        return;
+    }
+    GlueRunner::setGlueDir(dir);
+    setStatus("GLUE directory set: " + dir);
 }
 
 void MainWindow::onAbout()

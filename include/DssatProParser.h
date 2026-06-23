@@ -5,7 +5,8 @@
 #include <QMap>
 
 struct CropInfo {
-    QString module;      // genetics base, e.g. "MZCER048"
+    QString module;      // genetics file base, e.g. "CBGRO048" (used for .CUL/.ECO/.SPE paths)
+    QString modelId;     // DSSAT module ID, e.g. "CRGRO048" (written to SimulationControl ModelID)
     QString exe;         // e.g. "DSCSM048.EXE"
     QString expDir;      // e.g. "C:\DSSAT48\Maize"
     QString culFile;     // full path to .CUL file

@@ -43,6 +43,7 @@ protected:
 private slots:
     // Menu actions
     void onOpenDssatDir();
+    void onOpenGlueDir();
     void onAbout();
 
     // Crop/file selection

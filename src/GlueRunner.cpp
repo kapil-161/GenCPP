@@ -5,13 +5,113 @@
 #include <QFileInfo>
 #include <QTextStream>
 #include <QRegularExpression>
+#include <QSettings>
+#include <QStandardPaths>
 
-const QString GlueRunner::GLUE_DIR  = "C:/DSSAT48/Tools/GLUE";
-const QString GlueRunner::GLUE_WORK = "C:/DSSAT48/GLWork";
+QString GlueRunner::GLUE_DIR;
+QString GlueRunner::GLUE_WORK;
+
+// ── resolvePaths ──────────────────────────────────────────────────────────────
+bool GlueRunner::resolvePaths(const QString &dssatProPath)
+{
+    // 1. Try QSettings (user previously set it via menu)
+    QSettings s("DSSAT", "GeneticsEditor");
+    QString saved = s.value("GlueDir").toString();
+    if (!saved.isEmpty() && QFile::exists(saved + "/SimulationControl.csv")) {
+        setGlueDir(saved);
+        return true;
+    }
+
+    // 2. Common install locations
+    QStringList candidates;
+#ifdef Q_OS_WIN
+    candidates << "C:/DSSAT48/Tools/GLUE"
+               << "C:/glue-GLUEP_software";
+#else
+    QString home = QStandardPaths::writableLocation(QStandardPaths::HomeLocation);
+    candidates << home + "/glue-GLUEP_software"
+               << home + "/GLUEP_software"
+               << home + "/GLUE"
+               << "/Applications/DSSAT48/TOOLS/GLUE"
+               << "/Applications/DSSAT48/Tools/GLUE";
+#endif
+    for (const QString &c : candidates) {
+        if (QFile::exists(c + "/SimulationControl.csv")) {
+            setGlueDir(c);
+            return true;
+        }
+    }
+
+    // 3. Parse DGL entry from DSSATPRO file
+    if (!dssatProPath.isEmpty()) {
+        QFile f(dssatProPath);
+        if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            QTextStream in(&f);
+            while (!in.atEnd()) {
+                QString line = in.readLine().trimmed();
+                if (!line.startsWith("DGL")) continue;
+                QStringList parts = line.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+                // Windows: "DGL C: \DSSAT48\Tools\GLUE ..."
+                // macOS:   "DGL // /Applications/DSSAT48/TOOLS/GLUE ..."
+                QString dir;
+                if (parts.size() >= 3 && parts[1] == "//")
+                    dir = parts[2];
+                else if (parts.size() >= 2)
+                    dir = parts[1] + (parts.size() > 2 && parts[2].startsWith('\\') ? parts[2] : "");
+                if (!dir.isEmpty() && QFile::exists(dir + "/SimulationControl.csv")) {
+                    setGlueDir(dir);
+                    return true;
+                }
+                break;
+            }
+        }
+    }
+
+    // Not found — set OS defaults so paths are at least sensible
+#ifdef Q_OS_WIN
+    GLUE_DIR  = "C:/DSSAT48/Tools/GLUE";
+    GLUE_WORK = "C:/DSSAT48/GLWork";
+#else
+    GLUE_DIR  = QStandardPaths::writableLocation(QStandardPaths::HomeLocation) + "/glue-GLUEP_software";
+    GLUE_WORK = "/Applications/DSSAT48/GLWORK";
+#endif
+    return false;
+}
+
+// ── setGlueDir ────────────────────────────────────────────────────────────────
+void GlueRunner::setGlueDir(const QString &dir)
+{
+    GLUE_DIR = dir;
+
+    // Read OutputD from SimulationControl.csv to get GLUE_WORK
+    QString simCtrl = dir + "/SimulationControl.csv";
+    QFile f(simCtrl);
+    if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QTextStream in(&f);
+        while (!in.atEnd()) {
+            QString line = in.readLine().trimmed();
+            if (line.startsWith("OutputD,")) {
+                GLUE_WORK = line.mid(8).trimmed();
+                break;
+            }
+        }
+    }
+    // Fallback if OutputD not found in file
+    if (GLUE_WORK.isEmpty()) {
+#ifdef Q_OS_WIN
+        GLUE_WORK = "C:/DSSAT48/GLWork";
+#else
+        GLUE_WORK = "/Applications/DSSAT48/GLWORK";
+#endif
+    }
+
+    QSettings("DSSAT", "GeneticsEditor").setValue("GlueDir", dir);
+}
 
 // ── findRTerm ─────────────────────────────────────────────────────────────────
 QString GlueRunner::findRTerm()
 {
+#ifdef Q_OS_WIN
     QStringList versions = {"R-4.6.0","R-4.5.3","R-4.5.2","R-4.5.1","R-4.4.2","R-4.4.1","R-4.3.3"};
     QStringList bases    = {"C:/Program Files/R", "C:/PROGRA~1/R"};
     for (const QString &base : bases) {
@@ -26,6 +126,18 @@ QString GlueRunner::findRTerm()
         }
     }
     return "RTerm.exe";
+#else
+    // macOS/Linux: prefer Rscript from common install locations
+    QStringList candidates = {
+        "/opt/homebrew/bin/Rscript",
+        "/usr/local/bin/Rscript",
+        "/usr/bin/Rscript"
+    };
+    for (const QString &p : candidates) {
+        if (QFileInfo::exists(p)) return p;
+    }
+    return "Rscript";
+#endif
 }
 
 // ── scanExperiments ───────────────────────────────────────────────────────────
@@ -194,7 +306,7 @@ bool GlueRunner::updateSimControl(const CropInfo &cropInfo,
         else if (line.startsWith("CultivarBatchFile,"))
             line = QString("CultivarBatchFile,%1.%2C").arg(cultivarId, cropInfo.cropCode);
         else if (line.startsWith("ModelID,"))
-            line = QString("ModelID,%1").arg(cropInfo.module);
+            line = QString("ModelID,%1").arg(cropInfo.modelId.isEmpty() ? cropInfo.module : cropInfo.modelId);
     }
 
     QFile scOut(simCtrlPath);

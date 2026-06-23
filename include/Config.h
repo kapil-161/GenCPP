@@ -28,7 +28,7 @@ namespace Config {
     const QString DETAIL_CDE_FILE = "C:\\DSSAT48\\DETAIL.CDE";
 #else
     const QString DSSAT_BASE      = "/Applications/DSSAT48";
-    const QString DSSATPRO_FILE   = "/Applications/DSSAT48/DSSATPRO.v48";
+    const QString DSSATPRO_FILE   = "/Applications/DSSAT48/DSSATPRO.L48";
     const QString DETAIL_CDE_FILE = "/Applications/DSSAT48/DETAIL.CDE";
 #endif
 

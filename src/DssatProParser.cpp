@@ -54,9 +54,13 @@ QMap<QString, CropInfo> DssatProParser::discoverCrops(const QString &dssatProPat
     if (!proFile.open(QIODevice::ReadOnly | QIODevice::Text))
         return result;
 
-    // Reassemble split paths like ["C:", "\DSSAT48\Maize"] -> "C:\DSSAT48\Maize"
+    // Reassemble split paths.
+    // Windows format: ["C:", "\DSSAT48\Maize"]   -> "C:\DSSAT48\Maize"
+    // Linux/macOS format: ["//", "/Applications/DSSAT48/Maize"] -> "/Applications/DSSAT48/Maize"
     auto reassemblePath = [](const QStringList &tokens) -> QString {
         if (tokens.isEmpty()) return QString();
+        if (tokens[0] == "//" && tokens.size() > 1)
+            return tokens[1];
         QString path = tokens[0];
         if (tokens.size() > 1 && tokens[1].startsWith('\\'))
             path += tokens[1];
@@ -138,6 +142,7 @@ QMap<QString, CropInfo> DssatProParser::discoverCrops(const QString &dssatProPat
 
         CropInfo info;
         info.module      = base;
+        info.modelId     = modelCode + "048";
         info.exe         = exeMap.value(cropCode, "DSCSM048.EXE");
         info.expDir      = expDirMap.value(cropCode);
         info.culFile     = culPath;

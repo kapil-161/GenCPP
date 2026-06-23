@@ -3,6 +3,7 @@
 #include "EcoParser.h"
 #include "DssatProParser.h"
 #include "GlueRunner.h"
+#include "Config.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -78,7 +79,11 @@ int CommandLineHandler::runTests()
     fprintf(stdout, "\n=== Gen2 Headless Test Suite ===\n\n");
     fflush(stdout);
 
+#ifdef Q_OS_WIN
     const QString GENOTYPE = "C:/DSSAT48/Genotype";
+#else
+    const QString GENOTYPE = "/Applications/DSSAT48/Genotype";
+#endif
     QTemporaryDir tmp;
     if (!tmp.isValid()) {
         fprintf(stderr, "Cannot create temp dir\n");
@@ -313,7 +318,7 @@ int CommandLineHandler::runGlue(const CommandLineArgs &a)
     fflush(stdout);
 
     // ── 1. Resolve CropInfo ───────────────────────────────────────────────────
-    QMap<QString, CropInfo> crops = DssatProParser::discoverCrops("C:/DSSAT48/DSSATPRO.v48");
+    QMap<QString, CropInfo> crops = DssatProParser::discoverCrops(Config::DSSATPRO_FILE);
     CropInfo cropInfo;
     for (const CropInfo &c : crops) {
         if (c.cropCode.compare(a.cropCode, Qt::CaseInsensitive) != 0) continue;

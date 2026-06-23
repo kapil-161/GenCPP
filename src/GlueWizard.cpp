@@ -23,7 +23,7 @@
 
 static const QString GLUE_DIR       = GlueRunner::GLUE_DIR;
 static const QString GLUE_WORK      = GlueRunner::GLUE_WORK;
-static const QString BACKUP_DEFAULT = "C:/DSSAT48/GLWork/BackUp";
+static const QString BACKUP_DEFAULT = GlueRunner::GLUE_WORK + "/BackUp";
 
 GlueWizard::GlueWizard(const CropInfo &cropInfo,
                        const QString &cultivarId,
@@ -322,11 +322,19 @@ void GlueWizard::setupRunPage()
     });
     connect(m_outDevBtn, &QPushButton::clicked, this, [this]() {
         // ModelRunIndicator.txt has phenology/development summary
+#ifdef Q_OS_WIN
         QProcess::startDetached("notepad", {GLUE_WORK + "/ModelRunIndicator.txt"});
+#else
+        QProcess::startDetached("open", {GLUE_WORK + "/ModelRunIndicator.txt"});
+#endif
     });
     connect(m_outYieldBtn, &QPushButton::clicked, this, [this]() {
         // EvaluateFrame_2.txt has simulated vs observed for all treatments
+#ifdef Q_OS_WIN
         QProcess::startDetached("notepad", {GLUE_WORK + "/EvaluateFrame_2.txt"});
+#else
+        QProcess::startDetached("open", {GLUE_WORK + "/EvaluateFrame_2.txt"});
+#endif
     });
 
     m_stack->addWidget(page);

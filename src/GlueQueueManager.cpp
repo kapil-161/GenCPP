@@ -104,6 +104,7 @@ void GlueQueueManager::runNext()
     // Launch R
     m_lastLine  = 0;
     m_glueRound = 0;
+    m_stderrBuf.clear();
 
     m_process = new QProcess(this);
     m_process->setWorkingDirectory(GlueRunner::GLUE_DIR);
@@ -135,11 +136,9 @@ void GlueQueueManager::cleanup()
 
 void GlueQueueManager::onGlueOutput()
 {
-    // consumed to drain the pipe; log is not surfaced here
-    if (m_process) {
-        m_process->readAllStandardOutput();
-        m_process->readAllStandardError();
-    }
+    if (!m_process) return;
+    m_process->readAllStandardOutput();  // drain stdout (DSSAT console noise)
+    m_stderrBuf += QString::fromLatin1(m_process->readAllStandardError());
 }
 
 void GlueQueueManager::onPollProgress()
@@ -199,7 +198,11 @@ void GlueQueueManager::onGlueFinished(int exitCode)
     bool success = (exitCode == 0) && !culLine.isEmpty();
     entry.status        = success ? GlueQueueStatus::Done : GlueQueueStatus::Failed;
     entry.resultCulLine = culLine;
-    if (!success) entry.errorMsg = QString("Exit code %1").arg(exitCode);
+    if (!success) {
+        entry.errorMsg = QString("Exit code %1").arg(exitCode);
+        if (!m_stderrBuf.isEmpty())
+            entry.errorMsg += "\n\n" + m_stderrBuf.trimmed();
+    }
 
     // Save snapshot of all GLWork files to BackUp/<cropCode>_<cultivarId>/
     QString snapDir = GlueRunner::GLUE_WORK + "/BackUp/"

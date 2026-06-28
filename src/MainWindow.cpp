@@ -1784,6 +1784,77 @@ void MainWindow::onSpeCursorPositionChanged()
         }
     }
 
+    // ── Case D: CROPGRO *PLANT COMPOSITION VALUES stacked bar ────────────────
+    {
+        // Trigger: comment has 3+ comma-separated param names (not the 2-item X,Y pattern)
+        bool hasCompoundParams = false;
+        for (const QString &tok : comment.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts)) {
+            if (tok.count(',') >= 2) { hasCompoundParams = true; break; }
+        }
+        if (hasCompoundParams) {
+            // Walk backward to find !*PLANT COMPOSITION VALUES header
+            QTextBlock sectionHeader;
+            for (QTextBlock b = cursor.block().previous(); b.isValid(); b = b.previous()) {
+                QString t = b.text().trimmed();
+                if (t.contains("PLANT COMPOSITION", Qt::CaseInsensitive)) {
+                    sectionHeader = b; break;
+                }
+                if (t.startsWith('*') || t.startsWith("!*")) break;
+            }
+            if (sectionHeader.isValid()) {
+                // Collect all param->value mappings from the section
+                QMap<QString, double> pv;
+                for (QTextBlock b = sectionHeader.next(); b.isValid(); b = b.next()) {
+                    QString t = b.text().trimmed();
+                    if (t.isEmpty()) continue;
+                    if (t.startsWith('*') || t.startsWith("!*")) break;
+                    if (t.startsWith('!')) continue;
+                    QVector<double> lNums; QString lFT, lCom;
+                    parseLine(t, lNums, lFT, lCom);
+                    if (lNums.isEmpty()) continue;
+                    QStringList pNames;
+                    for (const QString &tok : lCom.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts))
+                        pNames << tok.split(',', Qt::SkipEmptyParts);
+                    for (int i = 0; i < pNames.size() && i < lNums.size(); ++i)
+                        pv[pNames[i].toUpper()] = lNums[i];
+                }
+                if (!pv.isEmpty()) {
+                    // Per-organ param names [component][organ]: Leaf/Stem/Root/Shell/Seed/Nodule
+                    static const QStringList ORGANS = {"Leaf","Stem","Root","Shell","Seed","Nodule"};
+                    static const QVector<QStringList> COMP_PARAMS = {
+                        {"PROLFF","PROSTF","PRORTF","PROSHF","SDPROS","PRONOD"},  // Protein
+                        {"PCARLF","PCARST","PCARRT","PCARSH","PCARSD","PCARNO"},  // Carbohydrate
+                        {"PLIPLF","PLIPST","PLIPRT","PLIPSH","",      "PLIPNO"},  // Lipid
+                        {"PLIGLF","PLIGST","PLIGRT","PLIGSH","PLIGSD","PLIGNO"},  // Lignin
+                        {"POALF", "POAST", "POART", "POASH", "POASD", "POANO"},   // Org. Acid
+                        {"PMINLF","PMINST","PMINRT","PMINSH","PMINSD","PMINNO"},  // Mineral
+                    };
+                    static const QStringList COMP_LABELS =
+                        {"Protein","Carbohydrate","Lipid","Lignin","Org. Acid","Mineral"};
+
+                    SpeGraphData data;
+                    data.type = SpeGraphType::StackedBar;
+                    data.title = "Plant Composition";
+                    data.xAxisLabel = "Organ";
+                    data.yAxisLabel = "Fraction";
+                    data.barCategories = ORGANS;
+                    for (int ci = 0; ci < COMP_PARAMS.size(); ++ci) {
+                        SpeGraphSeries s;
+                        s.label = COMP_LABELS[ci];
+                        for (int oi = 0; oi < ORGANS.size(); ++oi) {
+                            const QString &pn = COMP_PARAMS[ci][oi];
+                            double val = pn.isEmpty() ? 0.0 : pv.value(pn, 0.0);
+                            s.points.append(QPointF(oi, val));
+                        }
+                        data.series.append(s);
+                    }
+                    m_speGraphWidget->setData(data);
+                    return;
+                }
+            }
+        }
+    }
+
     // ── Case 5: unlabeled data row — walk backward for @-header table ─────────
     {
         for (QTextBlock b = cursor.block().previous(); b.isValid(); b = b.previous()) {

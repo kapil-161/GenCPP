@@ -12,11 +12,15 @@ struct SpeGraphSeries {
     QVector<QPointF> points;
 };
 
+enum class SpeGraphType { Line, StackedBar };
+
 struct SpeGraphData {
     QString title;
     QVector<SpeGraphSeries> series;
     QString xAxisLabel;
     QString yAxisLabel;
+    QStringList barCategories;            // organ labels for StackedBar X-axis
+    SpeGraphType type = SpeGraphType::Line;
 };
 
 class SpeGraphWidget : public QWidget

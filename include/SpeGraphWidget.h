@@ -5,10 +5,16 @@
 #include <QVector>
 #include <QPointF>
 #include <QString>
+#include <QColor>
+
+struct SpeGraphSeries {
+    QString label;
+    QVector<QPointF> points;
+};
 
 struct SpeGraphData {
     QString title;
-    QVector<QPointF> points;
+    QVector<SpeGraphSeries> series;
     QString xAxisLabel;
     QString yAxisLabel;
 };
@@ -29,7 +35,9 @@ protected:
 
 private:
     SpeGraphData m_data;
-    bool m_hasData;
+    bool m_hasData = false;
+
+    static const QVector<QColor> SERIES_COLORS;
 };
 
 #endif // SPEGRAPHWIDGET_H

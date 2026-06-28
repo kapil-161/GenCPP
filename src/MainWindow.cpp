@@ -1374,62 +1374,244 @@ void MainWindow::onSpeScrolled(int /*value*/)
 void MainWindow::onSpeCursorPositionChanged()
 {
     QTextCursor cursor = m_speEdit->textCursor();
-    QString line = cursor.block().text().trimmed();
+    QString trimmed = cursor.block().text().trimmed();
 
-    QStringList parts = line.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
-    QVector<double> temps;
-    
-    for (const QString &part : parts) {
-        bool ok;
-        double val = part.toDouble(&ok);
-        if (ok) {
-            temps.append(val);
+    // Skip empty lines, comments, section headers, and column headers
+    if (trimmed.isEmpty() || trimmed.startsWith('!') ||
+        trimmed.startsWith('*') || trimmed.startsWith('@')) {
+        m_speGraphWidget->clearData();
+        return;
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+
+    // Parse a SPE data line into leading numerics, optional function type
+    // (LIN/QDR/NON/INL), and the remaining comment string.
+    static const QStringList FUNC_TYPES = {"LIN","QDR","NON","INL"};
+    auto parseLine = [&](const QString &text,
+                         QVector<double> &nums,
+                         QString &funcType,
+                         QString &comment)
+    {
+        nums.clear(); funcType.clear(); comment.clear();
+        QStringList parts = text.trimmed().split(QRegularExpression("\\s+"),
+                                                  Qt::SkipEmptyParts);
+        bool pastNums = false;
+        for (const QString &t : parts) {
+            if (!pastNums) {
+                bool ok;
+                double v = t.toDouble(&ok);
+                if (ok) { nums.append(v); continue; }
+                pastNums = true;
+                if (FUNC_TYPES.contains(t.toUpper())) {
+                    funcType = t.toUpper();
+                    continue;  // don't include funcType in comment
+                }
+            }
+            comment += (comment.isEmpty() ? "" : " ") + t;
+        }
+    };
+
+    // Extract a clean parameter name from a trailing comment string.
+    auto paramFromComment = [](const QString &comment) -> QString {
+        if (comment.isEmpty()) return {};
+        QStringList toks = comment.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+        QString name = toks.first();
+        int p = name.indexOf('(');
+        if (p > 0) name = name.left(p);
+        name.remove(QRegularExpression("[,;:\\-]+$"));
+        return name;
+    };
+
+    // Walk forward/backward past blank and comment-only lines to the next data line.
+    auto nextDataBlock = [](QTextBlock b, int dir) -> QTextBlock {
+        b = (dir > 0) ? b.next() : b.previous();
+        while (b.isValid()) {
+            QString t = b.text().trimmed();
+            if (t.startsWith('*')) return QTextBlock{};  // section boundary
+            if (!t.isEmpty() && !t.startsWith('!')) return b;
+            b = (dir > 0) ? b.next() : b.previous();
+        }
+        return {};
+    };
+
+    // ── Parse current line ───────────────────────────────────────────────────
+    QVector<double> nums;
+    QString funcType, comment;
+    parseLine(trimmed, nums, funcType, comment);
+
+    if (nums.size() < 2) { m_speGraphWidget->clearData(); return; }
+
+    // ── Case 1: 4-value response function  (LIN / QDR / NON / INL) ──────────
+    if (nums.size() == 4 && !funcType.isEmpty()) {
+        double tb  = nums[0], to1 = nums[1], to2 = nums[2], tm = nums[3];
+
+        QString name = paramFromComment(comment);
+        SpeGraphData data;
+        data.title      = (name.isEmpty() ? "Response" : name) + "  [" + funcType + "]";
+        data.xAxisLabel = "Input Value";
+        data.yAxisLabel = "Relative Effect";
+
+        SpeGraphSeries series;
+        series.label = funcType;
+
+        if (funcType == "LIN") {
+            // Exact trapezoid — 0 at Tb/Tm, 1 between To1 and To2
+            series.points = { {tb,0}, {to1,1}, {to2,1}, {tm,0} };
         } else {
-            break;
+            // QDR / NON / INL — smooth curves with 80 interpolated points
+            double range = (tm > tb) ? tm - tb : 1.0;
+            for (int i = 0; i <= 80; ++i) {
+                double t = tb + range * i / 80.0;
+                double y = 0.0;
+                if (t <= tb || t >= tm) {
+                    y = 0.0;
+                } else if (t >= to1 && t <= to2) {
+                    y = 1.0;
+                } else if (t < to1) {
+                    double frac = (to1 > tb) ? (t - tb) / (to1 - tb) : 1.0;
+                    if      (funcType == "QDR") y = frac * frac;
+                    else if (funcType == "NON") y = frac * frac * (3.0 - 2.0 * frac);
+                    else                        y = frac;  // INL
+                } else {
+                    double frac = (tm > to2) ? (tm - t) / (tm - to2) : 1.0;
+                    if      (funcType == "QDR") y = frac * frac;
+                    else if (funcType == "NON") y = frac * frac * (3.0 - 2.0 * frac);
+                    else                        y = frac;  // INL
+                }
+                series.points.append({t, y});
+            }
+        }
+
+        data.series.append(series);
+        m_speGraphWidget->setData(data);
+        return;
+    }
+
+    // ── Case 2: interleaved X,Y on one line  (e.g. XRTFAC,YRTFAC) ───────────
+    {
+        QString xName, yName;
+        for (const QString &tok : comment.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts)) {
+            if (tok.contains(',')) {
+                QStringList sub = tok.split(',');
+                if (sub.size() == 2 &&
+                    sub[0].startsWith('X', Qt::CaseInsensitive) &&
+                    sub[1].startsWith('Y', Qt::CaseInsensitive)) {
+                    xName = sub[0]; yName = sub[1]; break;
+                }
+            }
+        }
+        if (!xName.isEmpty() && nums.size() >= 4 && nums.size() % 2 == 0) {
+            SpeGraphData data;
+            data.title      = xName + " / " + yName;
+            data.xAxisLabel = xName;
+            data.yAxisLabel = yName;
+            SpeGraphSeries s; s.label = yName;
+            for (int i = 0; i + 1 < nums.size(); i += 2)
+                s.points.append({nums[i], nums[i + 1]});
+            data.series.append(s);
+            m_speGraphWidget->setData(data);
+            return;
         }
     }
-    
-    if (temps.size() >= 3 && temps.size() <= 10) {
+
+    // ── Case 3: Y-line clicked — look backward for matching X-line ───────────
+    {
+        QString yName;
+        for (const QString &tok : comment.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts)) {
+            if (tok.size() >= 2 && tok[0].toUpper() == 'Y' && tok[1].isLetter()) {
+                yName = tok; break;
+            }
+        }
+        if (!yName.isEmpty()) {
+            QTextBlock prev = nextDataBlock(cursor.block(), -1);
+            if (prev.isValid()) {
+                QVector<double> xNums; QString xFT, xCom;
+                parseLine(prev.text().trimmed(), xNums, xFT, xCom);
+                if (xNums.size() == nums.size()) {
+                    QString xName;
+                    for (const QString &tok : xCom.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts)) {
+                        if (tok.size() >= 2 && tok[0].toUpper() == 'X' && tok[1].isLetter()) {
+                            xName = tok; break;
+                        }
+                    }
+                    SpeGraphData data;
+                    data.title      = yName;
+                    data.xAxisLabel = xName.isEmpty() ? "X" : xName;
+                    data.yAxisLabel = yName;
+                    SpeGraphSeries s; s.label = yName;
+                    for (int i = 0; i < xNums.size(); ++i)
+                        s.points.append({xNums[i], nums[i]});
+                    data.series.append(s);
+                    m_speGraphWidget->setData(data);
+                    return;
+                }
+            }
+        }
+    }
+
+    // ── Case 4: X-line (or unlabeled) — look forward for up to 2 Y-lines ────
+    {
+        // Only proceed if the comment has an X-prefixed label; unlabeled lines
+        // with no context are skipped to avoid pairing unrelated data rows.
+        QString xName;
+        for (const QString &tok : comment.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts)) {
+            if (tok.size() >= 2 && tok[0].toUpper() == 'X' && tok[1].isLetter()) {
+                xName = tok; break;
+            }
+        }
+        if (xName.isEmpty()) { m_speGraphWidget->clearData(); return; }
+
+        QString title = paramFromComment(comment);
+
         SpeGraphData data;
-        
-        QString paramName = "Parameter Curve";
-        if (parts.size() > temps.size()) {
-            paramName = parts.last();
+        data.title      = title.isEmpty() ? xName : title;
+        data.xAxisLabel = xName;
+        data.yAxisLabel = "Y";
+
+        // Helper: try to add a Y-line as a new series; returns true on success.
+        auto addYLine = [&](const QString &lineText) -> bool {
+            QVector<double> yNums; QString yFT, yCom;
+            parseLine(lineText, yNums, yFT, yCom);
+            if (yNums.size() != nums.size()) return false;
+            QString yName;
+            for (const QString &tok : yCom.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts)) {
+                if (tok.size() >= 2 && tok[0].toUpper() == 'Y' && tok[1].isLetter()) {
+                    yName = tok; break;
+                }
+            }
+            SpeGraphSeries s;
+            s.label = yName.isEmpty() ? "Y" : yName;
+            for (int i = 0; i < nums.size(); ++i)
+                s.points.append({nums[i], yNums[i]});
+            data.series.append(s);
+            if (!yName.isEmpty() && data.yAxisLabel == "Y") data.yAxisLabel = yName;
+            return true;
+        };
+
+        // First Y-line (required)
+        QTextBlock b1 = nextDataBlock(cursor.block(), +1);
+        if (!b1.isValid() || !addYLine(b1.text().trimmed())) {
+            m_speGraphWidget->clearData();
+            return;
         }
-        
-        data.title = QString("Graph: %1").arg(paramName);
-        // Note: Using a pure generic label since some params are non-temp
-        data.xAxisLabel = "Parameter Value";
-        data.yAxisLabel = "Relative Effect Y";
-        
-        if (temps.size() == 4) {
-             data.points.append(QPointF(temps[0], 0.0));
-             data.points.append(QPointF(temps[1], 1.0));
-             data.points.append(QPointF(temps[2], 1.0));
-             data.points.append(QPointF(temps[3], 0.0));
-        } else {
-             QTextBlock nextBlock = cursor.block().next();
-             if (nextBlock.isValid()) {
-                 QString nextLine = nextBlock.text().trimmed();
-                 QStringList nextParts = nextLine.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
-                 QVector<double> yVals;
-                 for (const QString &p : nextParts) {
-                     bool ok; double y = p.toDouble(&ok);
-                     if (ok) yVals.append(y); else break;
-                 }
-                 if (yVals.size() == temps.size()) {
-                     for (int i=0; i<temps.size(); i++) {
-                         data.points.append(QPointF(temps[i], yVals[i]));
-                     }
-                 } else {
-                     m_speGraphWidget->clearData();
-                     return;
-                 }
-             }
+
+        // Optional second Y-line (e.g. XVSHT → YVSHT + YVSWH)
+        QTextBlock b2 = nextDataBlock(b1, +1);
+        if (b2.isValid()) {
+            QString t2 = b2.text().trimmed();
+            QVector<double> y2; QString y2ft, y2com;
+            parseLine(t2, y2, y2ft, y2com);
+            bool hasYLabel = false;
+            for (const QString &tok : y2com.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts)) {
+                if (tok.size() >= 2 && tok[0].toUpper() == 'Y' && tok[1].isLetter()) {
+                    hasYLabel = true; break;
+                }
+            }
+            if (hasYLabel) addYLine(t2);
         }
+
         m_speGraphWidget->setData(data);
-    } else {
-        m_speGraphWidget->clearData();
     }
 }
 

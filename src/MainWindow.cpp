@@ -418,6 +418,15 @@ void MainWindow::setupCulTab(QWidget *tab)
             return;
         }
 
+        // Inline history comment: stamp the old line with date before overwriting
+        {
+            int numParams = m_culModel->columnCount() - CulTableModel::COL_PARAM0;
+            QVector<ParamFormat> fmts = CulParser::inferFormats(m_culModel->rows(), numParams);
+            QString oldLine = CulParser::formatRow(m_culModel->rows().at(culRow), fmts, numParams);
+            QString ts = QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm");
+            m_culModel->setRowPreComment(culRow, "! " + ts + " " + oldLine.trimmed());
+        }
+
         // Parse and apply params — fixed-width: VARNUM(6) SP VRNAME(16) EXPNO(7) ECO(6) SP params
         QString paramStr = culLine.mid(37).trimmed();
         QStringList vals = paramStr.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
@@ -428,7 +437,19 @@ void MainWindow::setupCulTab(QWidget *tab)
             if (ok)
                 m_culModel->setData(m_culModel->index(culRow, CulTableModel::COL_PARAM0 + i), v);
         }
-        setStatus(QString("GLUE calibration applied to %1 — click Save to write to file.").arg(varNum));
+
+        // Auto-save directly — no .bak file, inline comment already written above
+        if (!m_currentCulPath.isEmpty()) {
+            QStringList pNames;
+            int n = m_culModel->columnCount() - CulTableModel::COL_PARAM0;
+            for (int i = 0; i < n; ++i)
+                pNames << m_culModel->columnName(CulTableModel::COL_PARAM0 + i);
+            CulParser::write(m_currentCulPath, m_culModel->rows(), m_culHeaderLines, pNames);
+            m_culDirty = false;
+            setStatus(QString("GLUE calibration applied and saved for %1").arg(varNum));
+        } else {
+            setStatus(QString("GLUE calibration applied to %1 — click Save to write to file.").arg(varNum));
+        }
     });
 
     new QShortcut(QKeySequence::Copy, m_culView, this, &MainWindow::onCulCopyRow);

@@ -372,6 +372,12 @@ void CulTableModel::deleteRow(int row)
     emit dataModified();
 }
 
+void CulTableModel::setRowPreComment(int row, const QString &comment)
+{
+    if (row < 0 || row >= m_rows.size()) return;
+    m_rows[row].preComment = comment;
+}
+
 QString CulTableModel::Violation::toString() const
 {
     return QString("%1: %2=%3 (range: %4 to %5)")

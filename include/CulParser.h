@@ -30,6 +30,7 @@ struct CulRow {
     bool isMinMax = false;                       // true if varNum == "999991" or "999992"
     int fWidth = 6;                              // Inferred fixed-width format (e.g. 6 or 15)
     bool trailingBlank = false;                  // true if a blank line followed this row in the source file
+    QString preComment;                          // inline history comment written before this row
 };
 
 class CulParser

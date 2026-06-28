@@ -37,6 +37,7 @@ public:
     void addRowWithFullData(const QString &vrName, const QString &expNo, const QString &ecoNum, const QVector<std::optional<double>> &params);
     void duplicateRow(int row);
     void deleteRow(int row);
+    void setRowPreComment(int row, const QString &comment);
 
     // Column indices
     static const int COL_VARNUM  = 0;

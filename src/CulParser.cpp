@@ -104,6 +104,8 @@ QVector<CulRow> CulParser::parse(const QString &filePath, QStringList &headerLin
     in.setEncoding(QStringConverter::Latin1);
 
     bool inDataSection = false;
+    bool pastAtHeader = false;   // true after @VAR# line seen
+    QString pendingComment;      // accumulates ! lines in data section for next row
 
     while (!in.atEnd()) {
         QString line = in.readLine();
@@ -121,9 +123,17 @@ QVector<CulRow> CulParser::parse(const QString &filePath, QStringList &headerLin
 
         QChar first = line[0];
 
+        // ! lines after @VAR# header are inline history comments for the next data row
+        if (first == '!' && pastAtHeader) {
+            pendingComment += (pendingComment.isEmpty() ? "" : "\n") + line;
+            continue;
+        }
+
         // Skip / preserve header lines
         if (first == '*' || first == '!' || first == '@' || first == '$') {
+            if (first == '@') pastAtHeader = true;
             headerLines << line;
+            pendingComment.clear();
             continue;
         }
 
@@ -156,6 +166,8 @@ QVector<CulRow> CulParser::parse(const QString &filePath, QStringList &headerLin
         }
 
         row.isMinMax = (row.varNum == "999991" || row.varNum == "999992");
+        row.preComment = pendingComment;
+        pendingComment.clear();
         rows << row;
     }
 
@@ -218,8 +230,10 @@ bool CulParser::write(const QString &filePath,
     }
     QVector<ParamFormat> formats = inferFormats(rows, numParams);
 
-    // Write data rows, preserving blank lines that appeared after each row in the source
+    // Write data rows, preserving inline history comments and blank lines
     for (const CulRow &row : rows) {
+        if (!row.preComment.isEmpty())
+            out << row.preComment << "\n";
         out << formatRow(row, formats, numParams) << "\n";
         if (row.trailingBlank)
             out << "\n";

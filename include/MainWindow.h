@@ -59,6 +59,7 @@ private slots:
     void onCulSearch(const QString &text);
     void onCulPasteGlue();
     void onCulCopyRow();
+    void onCulHeaderContextMenu(const QPoint &pos);
 
     // ECO tab buttons
     void onEcoAdd();
@@ -93,6 +94,7 @@ private:
     void refreshEcoCrossRef();
     void buildSpeNavigator();
     void setStatus(const QString &msg, bool error = false);
+    void updateCalibrationHeaderLine();
 
     // UI – top bar
     QLineEdit  *m_dssatDirEdit;

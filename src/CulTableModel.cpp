@@ -23,6 +23,22 @@ void CulTableModel::setCalibrationTypes(const QMap<QString, QString> &types)
     emit headerDataChanged(Qt::Horizontal, COL_PARAM0, columnCount() - 1);
 }
 
+void CulTableModel::setCalibrationTypeForParam(const QString &paramName, const QString &type)
+{
+    if (type.isEmpty())
+        m_calibTypes.remove(paramName);
+    else
+        m_calibTypes[paramName] = type;
+
+    for (int col = COL_PARAM0; col < columnCount(); ++col) {
+        if (columnName(col) == paramName) {
+            emit headerDataChanged(Qt::Horizontal, col, col);
+            break;
+        }
+    }
+    emit calibrationTypeChanged(paramName, type);
+}
+
 void CulTableModel::setRows(const QVector<CulRow> &rows)
 {
     beginResetModel();

@@ -51,6 +51,7 @@ public:
 #include <QClipboard>
 #include <QShortcut>
 #include <QScrollBar>
+#include <QMenu>
 #include <QAbstractTextDocumentLayout>
 #include <QTimer>
 #include <QDebug>
@@ -379,6 +380,11 @@ void MainWindow::setupCulTab(QWidget *tab)
     m_culView->verticalHeader()->setDefaultSectionSize(22);
     m_culView->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_culView->setSortingEnabled(true);
+
+    // Right-click on column headers to change P/G/N calibration type
+    m_culView->horizontalHeader()->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_culView->horizontalHeader(), &QHeaderView::customContextMenuRequested,
+            this, &MainWindow::onCulHeaderContextMenu);
 
     // Queue panel below table in a splitter
     m_gluePanel = new GlueQueuePanel(m_glueQueue, tab);
@@ -1467,4 +1473,69 @@ void MainWindow::setStatus(const QString &msg, bool error)
     m_statusLabel->setStyleSheet(error
         ? "color: #C62828; font-weight: bold;"
         : "color: #1B5E20;");
+}
+
+void MainWindow::onCulHeaderContextMenu(const QPoint &pos)
+{
+    int col = m_culView->horizontalHeader()->logicalIndexAt(pos);
+    if (col < CulTableModel::COL_PARAM0) return;
+
+    QString paramName = m_culModel->columnName(col);
+    QString current = m_culModel->calibrationTypes().value(paramName);
+
+    QMenu menu(this);
+    menu.setTitle(QString("Calibration type: %1").arg(paramName));
+
+    QAction *pAct = menu.addAction("P — Phenology");
+    QAction *gAct = menu.addAction("G — Growth");
+    QAction *nAct = menu.addAction("N — Not calibrated");
+
+    pAct->setCheckable(true); pAct->setChecked(current == "P");
+    gAct->setCheckable(true); gAct->setChecked(current == "G");
+    nAct->setCheckable(true); nAct->setChecked(current == "N");
+
+    QAction *chosen = menu.exec(m_culView->horizontalHeader()->mapToGlobal(pos));
+    if (!chosen) return;
+
+    QString newType;
+    if (chosen == pAct) newType = "P";
+    else if (chosen == gAct) newType = "G";
+    else newType = "N";
+
+    if (newType == current) return;
+
+    m_culModel->setCalibrationTypeForParam(paramName, newType);
+    updateCalibrationHeaderLine();
+    m_culDirty = true;
+    setStatus(QString("Calibration type for %1 set to %2 — click Save to write to file.").arg(paramName, newType));
+}
+
+void MainWindow::updateCalibrationHeaderLine()
+{
+    QStringList paramNames = CulParser::extractParamNames(m_culHeaderLines);
+    if (paramNames.isEmpty()) return;
+
+    const QMap<QString, QString> &types = m_culModel->calibrationTypes();
+
+    QString calLine = "!Calibration";
+    for (const QString &name : paramNames)
+        calLine += "  " + types.value(name, "N");
+
+    static const QRegularExpression calRe("^!\\s*[Cc]alibration\\b");
+    bool found = false;
+    for (int i = 0; i < m_culHeaderLines.size(); ++i) {
+        if (calRe.match(m_culHeaderLines[i]).hasMatch()) {
+            m_culHeaderLines[i] = calLine;
+            found = true;
+            break;
+        }
+    }
+    if (!found) {
+        for (int i = 0; i < m_culHeaderLines.size(); ++i) {
+            if (m_culHeaderLines[i].startsWith('@')) {
+                m_culHeaderLines.insert(i, calLine);
+                break;
+            }
+        }
+    }
 }

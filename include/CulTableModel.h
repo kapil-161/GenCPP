@@ -53,6 +53,8 @@ public:
 
     void setColumnTooltips(const QMap<QString, QString> &tips) { m_tips = tips; }
     void setCalibrationTypes(const QMap<QString, QString> &types);
+    void setCalibrationTypeForParam(const QString &paramName, const QString &type);
+    QMap<QString, QString> calibrationTypes() const { return m_calibTypes; }
 
     // Validation: returns a list of violations (e.g., "CAND01: PPSEN=0.5 (range: -0.2 to -0.04)")
     struct Violation {
@@ -68,6 +70,7 @@ public:
 
 signals:
     void dataModified();
+    void calibrationTypeChanged(const QString &paramName, const QString &type);
 
 private:
     bool isOutOfRange(int paramIdx, double value) const;

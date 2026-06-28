@@ -1376,28 +1376,43 @@ void MainWindow::onSpeCursorPositionChanged()
     QTextCursor cursor = m_speEdit->textCursor();
     QString trimmed = cursor.block().text().trimmed();
 
-    // Skip empty lines, comments, section headers, and column headers
-    if (trimmed.isEmpty() || trimmed.startsWith('!') ||
-        trimmed.startsWith('*') || trimmed.startsWith('@')) {
+    // Skip empty lines, standalone comments, and section headers (*).
+    // @ header lines are handled via tryRenderAtTable below.
+    bool onAtHeader = trimmed.startsWith('@');
+    if (trimmed.isEmpty() || trimmed.startsWith('!') || trimmed.startsWith('*')) {
         m_speGraphWidget->clearData();
         return;
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
-    // Parse a SPE data line into leading numerics, optional function type
-    // (LIN/QDR/NON/INL), and the remaining comment string.
     static const QStringList FUNC_TYPES = {"LIN","QDR","NON","INL"};
+
+    // Parse a SPE data line. If the first token is non-numeric and not a func
+    // type, it is treated as a CERES-style leading keyword (returned). The
+    // remaining tokens are split into nums, funcType, and trailing comment.
     auto parseLine = [&](const QString &text,
                          QVector<double> &nums,
                          QString &funcType,
-                         QString &comment)
+                         QString &comment) -> QString
     {
         nums.clear(); funcType.clear(); comment.clear();
+        QString keyword;
         QStringList parts = text.trimmed().split(QRegularExpression("\\s+"),
                                                   Qt::SkipEmptyParts);
+        if (parts.isEmpty()) return keyword;
+
+        int startIdx = 0;
+        bool firstOk;
+        parts[0].toDouble(&firstOk);
+        if (!firstOk && !FUNC_TYPES.contains(parts[0].toUpper())) {
+            keyword = parts[0];
+            startIdx = 1;
+        }
+
         bool pastNums = false;
-        for (const QString &t : parts) {
+        for (int i = startIdx; i < parts.size(); ++i) {
+            const QString &t = parts[i];
             if (!pastNums) {
                 bool ok;
                 double v = t.toDouble(&ok);
@@ -1405,11 +1420,12 @@ void MainWindow::onSpeCursorPositionChanged()
                 pastNums = true;
                 if (FUNC_TYPES.contains(t.toUpper())) {
                     funcType = t.toUpper();
-                    continue;  // don't include funcType in comment
+                    continue;
                 }
             }
             comment += (comment.isEmpty() ? "" : " ") + t;
         }
+        return keyword;
     };
 
     // Extract a clean parameter name from a trailing comment string.
@@ -1435,57 +1451,151 @@ void MainWindow::onSpeCursorPositionChanged()
         return {};
     };
 
-    // ── Parse current line ───────────────────────────────────────────────────
-    QVector<double> nums;
-    QString funcType, comment;
-    parseLine(trimmed, nums, funcType, comment);
-
-    if (nums.size() < 2) { m_speGraphWidget->clearData(); return; }
-
-    // ── Case 1: 4-value response function  (LIN / QDR / NON / INL) ──────────
-    if (nums.size() == 4 && !funcType.isEmpty()) {
-        double tb  = nums[0], to1 = nums[1], to2 = nums[2], tm = nums[3];
-
-        QString name = paramFromComment(comment);
-        SpeGraphData data;
-        data.title      = (name.isEmpty() ? "Response" : name) + "  [" + funcType + "]";
-        data.xAxisLabel = "Input Value";
-        data.yAxisLabel = "Relative Effect";
-
-        SpeGraphSeries series;
-        series.label = funcType;
-
-        if (funcType == "LIN") {
-            // Exact trapezoid — 0 at Tb/Tm, 1 between To1 and To2
-            series.points = { {tb,0}, {to1,1}, {to2,1}, {tm,0} };
+    // Build a 4-value response curve series (linear trapezoid or smooth curve).
+    auto make4ValSeries = [](const QString &label,
+                              double tb, double to1, double to2, double tm,
+                              const QString &funcType) -> SpeGraphSeries
+    {
+        SpeGraphSeries s;
+        s.label = label;
+        if (funcType == "LIN" || funcType.isEmpty()) {
+            s.points = { {tb,0.0}, {to1,1.0}, {to2,1.0}, {tm,0.0} };
         } else {
-            // QDR / NON / INL — smooth curves with 80 interpolated points
             double range = (tm > tb) ? tm - tb : 1.0;
             for (int i = 0; i <= 80; ++i) {
-                double t = tb + range * i / 80.0;
+                double x = tb + range * i / 80.0;
                 double y = 0.0;
-                if (t <= tb || t >= tm) {
-                    y = 0.0;
-                } else if (t >= to1 && t <= to2) {
-                    y = 1.0;
-                } else if (t < to1) {
-                    double frac = (to1 > tb) ? (t - tb) / (to1 - tb) : 1.0;
+                if (x <= tb || x >= tm) { y = 0.0; }
+                else if (x >= to1 && x <= to2) { y = 1.0; }
+                else if (x < to1) {
+                    double frac = (to1 > tb) ? (x - tb) / (to1 - tb) : 1.0;
                     if      (funcType == "QDR") y = frac * frac;
                     else if (funcType == "NON") y = frac * frac * (3.0 - 2.0 * frac);
-                    else                        y = frac;  // INL
+                    else                        y = frac;
                 } else {
-                    double frac = (tm > to2) ? (tm - t) / (tm - to2) : 1.0;
+                    double frac = (tm > to2) ? (tm - x) / (tm - to2) : 1.0;
                     if      (funcType == "QDR") y = frac * frac;
                     else if (funcType == "NON") y = frac * frac * (3.0 - 2.0 * frac);
-                    else                        y = frac;  // INL
+                    else                        y = frac;
                 }
-                series.points.append({t, y});
+                s.points.append({x, y});
+            }
+        }
+        return s;
+    };
+
+    // Try to render an @-header columnar table starting at headerBlock.
+    // Handles: 4-row temp-function tables, 2-col XY tables, multi-col series.
+    auto tryRenderAtTable = [&](QTextBlock headerBlock) -> bool {
+        QString hdr = headerBlock.text().trimmed().mid(1);  // strip '@'
+        QStringList cols = hdr.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+        if (cols.size() < 2) return false;
+
+        QVector<QVector<double>> tableData;
+        for (QTextBlock b = headerBlock.next(); b.isValid(); b = b.next()) {
+            QString t = b.text().trimmed();
+            if (t.startsWith('*') || t.startsWith('@')) break;
+            if (!t.isEmpty() && !t.startsWith('!')) {
+                QVector<double> rowNums; QString ft, com;
+                parseLine(t, rowNums, ft, com);
+                if (!rowNums.isEmpty()) tableData.append(rowNums);
+            }
+        }
+        if (tableData.isEmpty()) return false;
+
+        int nRows = tableData.size();
+        int usableCols = cols.size();
+        for (const auto &row : tableData)
+            usableCols = std::min(usableCols, (int)row.size());
+
+        // 4 data rows, ≥2 cols → each column is a [Tb,To1,To2,Tm] temp function
+        if (nRows == 4 && usableCols >= 2) {
+            SpeGraphData data;
+            data.xAxisLabel = "Temperature";
+            data.yAxisLabel = "Relative Effect";
+            int maxCols = std::min(usableCols, 8);
+            for (int c = 0; c < maxCols && c < cols.size(); ++c) {
+                double tb  = tableData[0][c], to1 = tableData[1][c];
+                double to2 = tableData[2][c], tm  = tableData[3][c];
+                if (tb > to1 || to1 > to2 || to2 > tm) continue;
+                data.series.append(make4ValSeries(cols[c], tb, to1, to2, tm, ""));
+            }
+            if (!data.series.isEmpty()) {
+                data.title = cols[0];
+                m_speGraphWidget->setData(data);
+                return true;
             }
         }
 
-        data.series.append(series);
-        m_speGraphWidget->setData(data);
+        // 2 usable cols, ≥2 rows → simple XY table
+        if (usableCols == 2 && nRows >= 2) {
+            SpeGraphData data;
+            data.title = cols[0] + " / " + cols[1];
+            data.xAxisLabel = cols[0];
+            data.yAxisLabel = cols[1];
+            SpeGraphSeries s; s.label = cols[1];
+            for (const auto &row : tableData)
+                if ((int)row.size() >= 2) s.points.append({row[0], row[1]});
+            if (!s.points.isEmpty()) {
+                data.series.append(s);
+                m_speGraphWidget->setData(data);
+                return true;
+            }
+        }
+
+        // ≥3 usable cols, ≥3 rows → col0 = X, remaining cols = Y series
+        if (usableCols >= 3 && nRows >= 3) {
+            SpeGraphData data;
+            data.title = cols[0];
+            data.xAxisLabel = cols[0];
+            data.yAxisLabel = "Value";
+            int maxSeries = std::min(usableCols - 1, 4);
+            for (int c = 1; c <= maxSeries && c < cols.size(); ++c) {
+                SpeGraphSeries s; s.label = cols[c];
+                for (const auto &row : tableData)
+                    if ((int)row.size() > c) s.points.append({row[0], row[c]});
+                if (!s.points.isEmpty()) data.series.append(s);
+            }
+            if (!data.series.isEmpty()) {
+                m_speGraphWidget->setData(data);
+                return true;
+            }
+        }
+
+        return false;
+    };
+
+    // ── Handle @ header line directly ────────────────────────────────────────
+    if (onAtHeader) {
+        if (!tryRenderAtTable(cursor.block()))
+            m_speGraphWidget->clearData();
         return;
+    }
+
+    // ── Parse current line ───────────────────────────────────────────────────
+    QVector<double> nums;
+    QString funcType, comment;
+    QString keyword = parseLine(trimmed, nums, funcType, comment);
+
+    if (nums.size() < 2) { m_speGraphWidget->clearData(); return; }
+
+    // ── Case 1: 4-value response function  (LIN/QDR/NON/INL or keyword-first) ─
+    // Also handles CERES-style "PRFTC  6.2  16.5  33.0  44.0" lines.
+    if (nums.size() == 4 && (!funcType.isEmpty() || !keyword.isEmpty())) {
+        double tb = nums[0], to1 = nums[1], to2 = nums[2], tm = nums[3];
+        if (tb <= to1 && to1 <= to2 && to2 <= tm) {
+            QString name = keyword.isEmpty() ? paramFromComment(comment) : keyword;
+            SpeGraphData data;
+            data.title      = (name.isEmpty() ? "Response" : name) +
+                              (funcType.isEmpty() ? "" : "  [" + funcType + "]");
+            data.xAxisLabel = keyword.isEmpty() ? "Input Value" : "Temperature";
+            data.yAxisLabel = "Relative Effect";
+            data.series.append(make4ValSeries(
+                funcType.isEmpty() ? name : funcType,
+                tb, to1, to2, tm, funcType));
+            m_speGraphWidget->setData(data);
+            return;
+        }
     }
 
     // ── Case 2: interleaved X,Y on one line  (e.g. XRTFAC,YRTFAC) ───────────
@@ -1512,6 +1622,53 @@ void MainWindow::onSpeCursorPositionChanged()
             data.series.append(s);
             m_speGraphWidget->setData(data);
             return;
+        }
+    }
+
+    // ── Case B: CERES keyword X/Y pair  (e.g. CO2X / CO2Y) ──────────────────
+    if (!keyword.isEmpty()) {
+        QString kUpper = keyword.toUpper();
+        auto partnerKw = [](const QString &kw, QChar from, QChar to) -> QString {
+            if (kw.toUpper().endsWith(from))
+                return kw.left(kw.size() - 1) + to;
+            return {};
+        };
+        if (kUpper.endsWith('X')) {
+            QString yKw = partnerKw(keyword, 'X', 'Y');
+            QTextBlock next = nextDataBlock(cursor.block(), +1);
+            if (next.isValid()) {
+                QVector<double> yNums; QString yFT, yCom;
+                QString yKwFound = parseLine(next.text().trimmed(), yNums, yFT, yCom);
+                if (yKwFound.toUpper() == yKw.toUpper() && yNums.size() == nums.size()) {
+                    SpeGraphData data;
+                    data.title = keyword + " / " + yKwFound;
+                    data.xAxisLabel = keyword; data.yAxisLabel = yKwFound;
+                    SpeGraphSeries s; s.label = yKwFound;
+                    for (int i = 0; i < nums.size(); ++i)
+                        s.points.append({nums[i], yNums[i]});
+                    data.series.append(s);
+                    m_speGraphWidget->setData(data);
+                    return;
+                }
+            }
+        } else if (kUpper.endsWith('Y')) {
+            QString xKw = partnerKw(keyword, 'Y', 'X');
+            QTextBlock prev = nextDataBlock(cursor.block(), -1);
+            if (prev.isValid()) {
+                QVector<double> xNums; QString xFT, xCom;
+                QString xKwFound = parseLine(prev.text().trimmed(), xNums, xFT, xCom);
+                if (xKwFound.toUpper() == xKw.toUpper() && xNums.size() == nums.size()) {
+                    SpeGraphData data;
+                    data.title = xKwFound + " / " + keyword;
+                    data.xAxisLabel = xKwFound; data.yAxisLabel = keyword;
+                    SpeGraphSeries s; s.label = keyword;
+                    for (int i = 0; i < xNums.size(); ++i)
+                        s.points.append({xNums[i], nums[i]});
+                    data.series.append(s);
+                    m_speGraphWidget->setData(data);
+                    return;
+                }
+            }
         }
     }
 
@@ -1550,27 +1707,23 @@ void MainWindow::onSpeCursorPositionChanged()
         }
     }
 
-    // ── Case 4: X-line (or unlabeled) — look forward for up to 2 Y-lines ────
+    // ── Case 4: X-line — look forward for up to 2 Y-lines (CROPGRO style) ───
     {
-        // Only proceed if the comment has an X-prefixed label; unlabeled lines
-        // with no context are skipped to avoid pairing unrelated data rows.
         QString xName;
         for (const QString &tok : comment.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts)) {
             if (tok.size() >= 2 && tok[0].toUpper() == 'X' && tok[1].isLetter()) {
                 xName = tok; break;
             }
         }
-        if (xName.isEmpty()) { m_speGraphWidget->clearData(); return; }
+        if (!xName.isEmpty()) {
+            QString title = paramFromComment(comment);
+            SpeGraphData data;
+            data.title      = title.isEmpty() ? xName : title;
+            data.xAxisLabel = xName;
+            data.yAxisLabel = "Y";
 
-        QString title = paramFromComment(comment);
-
-        SpeGraphData data;
-        data.title      = title.isEmpty() ? xName : title;
-        data.xAxisLabel = xName;
-        data.yAxisLabel = "Y";
-
-        // Helper: try to add a Y-line as a new series; returns true on success.
-        auto addYLine = [&](const QString &lineText) -> bool {
+            // Helper: try to add a Y-line as a new series; returns true on success.
+            auto addYLine = [&](const QString &lineText) -> bool {
             QVector<double> yNums; QString yFT, yCom;
             parseLine(lineText, yNums, yFT, yCom);
             if (yNums.size() != nums.size()) return false;
@@ -1589,30 +1742,40 @@ void MainWindow::onSpeCursorPositionChanged()
             return true;
         };
 
-        // First Y-line (required)
-        QTextBlock b1 = nextDataBlock(cursor.block(), +1);
-        if (!b1.isValid() || !addYLine(b1.text().trimmed())) {
-            m_speGraphWidget->clearData();
-            return;
-        }
-
-        // Optional second Y-line (e.g. XVSHT → YVSHT + YVSWH)
-        QTextBlock b2 = nextDataBlock(b1, +1);
-        if (b2.isValid()) {
-            QString t2 = b2.text().trimmed();
-            QVector<double> y2; QString y2ft, y2com;
-            parseLine(t2, y2, y2ft, y2com);
-            bool hasYLabel = false;
-            for (const QString &tok : y2com.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts)) {
-                if (tok.size() >= 2 && tok[0].toUpper() == 'Y' && tok[1].isLetter()) {
-                    hasYLabel = true; break;
+            QTextBlock b1 = nextDataBlock(cursor.block(), +1);
+            if (b1.isValid() && addYLine(b1.text().trimmed())) {
+                QTextBlock b2 = nextDataBlock(b1, +1);
+                if (b2.isValid()) {
+                    QString t2 = b2.text().trimmed();
+                    QVector<double> y2; QString y2ft, y2com;
+                    parseLine(t2, y2, y2ft, y2com);
+                    bool hasYLabel = false;
+                    for (const QString &tok : y2com.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts)) {
+                        if (tok.size() >= 2 && tok[0].toUpper() == 'Y' && tok[1].isLetter()) {
+                            hasYLabel = true; break;
+                        }
+                    }
+                    if (hasYLabel) addYLine(t2);
                 }
+                m_speGraphWidget->setData(data);
+                return;
             }
-            if (hasYLabel) addYLine(t2);
         }
-
-        m_speGraphWidget->setData(data);
     }
+
+    // ── Case 5: unlabeled data row — walk backward for @-header table ─────────
+    {
+        for (QTextBlock b = cursor.block().previous(); b.isValid(); b = b.previous()) {
+            QString t = b.text().trimmed();
+            if (t.startsWith('*')) break;
+            if (t.startsWith('@')) {
+                if (tryRenderAtTable(b)) return;
+                break;
+            }
+        }
+    }
+
+    m_speGraphWidget->clearData();
 }
 
 // ─── Menu actions ─────────────────────────────────────────────────────────────

@@ -297,21 +297,42 @@ CulRow CulParser::parseLine(const QString &rawLine)
     return row;
 }
 
+// Built-in fallback classification for the 18 standard CROPGRO cultivar
+// parameters, used only when a file has no "!Calibration" header line of
+// its own. Phenology (P) params drive development timing; Growth (G) params
+// drive vegetative/reproductive growth; seed-composition traits (SDPRO,
+// SDLIP) are typically measured rather than calibrated, so they default to
+// "Not calibrated" (N). Any of these can still be overridden per-file via
+// the column header right-click menu, which persists the choice by writing
+// an explicit "!Calibration" line.
+static const QMap<QString, QString> DEFAULT_CALIBRATION_TYPES = {
+    {"CSDL",  "P"}, {"PPSEN", "P"}, {"EM-FL", "P"}, {"FL-SH", "P"},
+    {"FL-SD", "P"}, {"SD-PM", "P"}, {"FL-LF", "P"},
+    {"LFMAX", "G"}, {"SLAVR", "G"}, {"SIZLF", "G"}, {"XFRT",  "G"},
+    {"WTPSD", "G"}, {"SFDUR", "G"}, {"SDPDV", "G"}, {"PODUR", "G"},
+    {"THRSH", "G"},
+    {"SDPRO", "N"}, {"SDLIP", "N"},
+};
+
 QMap<QString, QString> CulParser::calibrationTypes(const QStringList &headerLines)
 {
-    QMap<QString, QString> types;
     static const QRegularExpression calRe("^!\\s*[Cc]alibration\\b");
 
     for (const QString &line : headerLines) {
         if (!calRe.match(line).hasMatch()) continue;
 
         // Split and skip the first token ("!Calibration")
+        QMap<QString, QString> types;
         QStringList tokens = line.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
         for (int i = 1; i < tokens.size() && (i - 1) < CUL_PARAM_NAMES.size(); ++i)
             types[CUL_PARAM_NAMES[i - 1]] = tokens[i].toUpper();
-        break;
+        return types;
     }
-    return types;
+
+    // No "!Calibration" line in this file yet — seed sensible defaults for
+    // the standard parameter set so the P/G/N badges show up without
+    // requiring a manual per-column selection first.
+    return DEFAULT_CALIBRATION_TYPES;
 }
 
 QMap<QString, QString> CulParser::tooltipsFromHeader(const QStringList &headerLines)

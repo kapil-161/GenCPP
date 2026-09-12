@@ -114,7 +114,15 @@ void GlueQueueManager::runNext()
             this, [this](int code, QProcess::ExitStatus){ onGlueFinished(code); });
 
     QString rterm = GlueRunner::findRTerm();
+#ifdef Q_OS_WIN
+    // RTerm.exe requires an explicit -f flag to execute a script file; a bare
+    // trailing filename is silently ignored, leaving RTerm idle at an
+    // interactive prompt (0% CPU, never finishes) instead of running GLUE.r.
+    m_process->start(rterm, {"--slave", "-f", GlueRunner::GLUE_DIR + "/GLUE.r"});
+#else
+    // Rscript (used on macOS/Linux) runs a bare filename argument directly.
     m_process->start(rterm, {"--slave", GlueRunner::GLUE_DIR + "/GLUE.r"});
+#endif
 
     m_pollTimer = new QTimer(this);
     connect(m_pollTimer, &QTimer::timeout, this, &GlueQueueManager::onPollProgress);

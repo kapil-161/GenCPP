@@ -107,6 +107,15 @@ QVector<CulRow> CulParser::parse(const QString &filePath, QStringList &headerLin
     bool pastAtHeader = false;   // true after @VAR# line seen
     QString pendingComment;      // accumulates ! lines in data section for next row
 
+    // Structural comment lines that can legitimately appear between @VAR# and
+    // the first data row (e.g. stock DSSAT files pairing "!Coefficient #" with
+    // "!Calibration"). These must stay in headerLines — not be swept into the
+    // next row's preComment — or calibrationTypes()/tooltipsFromHeader() can
+    // no longer find them, and a later header-menu save would insert a
+    // duplicate, incorrect "!Calibration" line instead of updating this one.
+    static const QRegularExpression calibLineRe("^!\\s*[Cc]alibration\\b");
+    static const QRegularExpression coeffNumRe("^!\\s*[Cc]oefficient\\s*#");
+
     while (!in.atEnd()) {
         QString line = in.readLine();
         // Remove Windows \r if present
@@ -125,6 +134,10 @@ QVector<CulRow> CulParser::parse(const QString &filePath, QStringList &headerLin
 
         // ! lines after @VAR# header are inline history comments for the next data row
         if (first == '!' && pastAtHeader) {
+            if (calibLineRe.match(line).hasMatch() || coeffNumRe.match(line).hasMatch()) {
+                headerLines << line;
+                continue;
+            }
             pendingComment += (pendingComment.isEmpty() ? "" : "\n") + line;
             continue;
         }

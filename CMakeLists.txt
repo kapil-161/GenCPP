@@ -41,6 +41,14 @@ configure_file(
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Set when configuring against a truly static Qt build (CMAKE_PREFIX_PATH
+# pointing at a Qt compiled with -static), as opposed to a normal dynamic Qt
+# kit — whose MinGW .a files are import libs, not real static archives, even
+# though they share the same .a extension. See GB2CPP/CMakeLists.txt for the
+# full rationale; same fix applied here (same AV false-positive root cause:
+# an NSIS self-extracting launcher looks like a dropper to ML heuristics).
+option(GEN2_STATIC_QT "Building against a fully static Qt (no plugin DLLs to load)" OFF)
+
 # Static runtime linking for MinGW
 if(MINGW)
     set(CMAKE_EXE_LINKER_FLAGS "-static -static-libgcc -static-libstdc++")
@@ -162,6 +170,10 @@ endif()
 # Debug definitions
 if(NOT CMAKE_BUILD_TYPE STREQUAL "Release")
     target_compile_definitions(GeneticsEditor PRIVATE ENABLE_DEBUG_OUTPUT)
+endif()
+
+if(GEN2_STATIC_QT)
+    target_compile_definitions(GeneticsEditor PRIVATE GEN2_STATIC_BUILD)
 endif()
 
 # Output directory

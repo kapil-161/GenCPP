@@ -7,12 +7,25 @@
 
 QString CulParser::formatParam(double value, const ParamFormat &fmt)
 {
+    // Result is always exactly width+1 chars: a separating space, then the value
+    // right-aligned in `width` columns. If the value is too wide, drop the leading
+    // zero ("-0.006" -> "-.006", DSSAT style), then decimals, until it fits.
+    QString s;
     if (fmt.trailingDot) {
         // e.g. " 380." - integer + "." right-justified
-        QString s = QString::number(qRound(value)) + ".";
-        return " " + s.rightJustified(fmt.width, ' ');
+        s = QString::number(qRound(value)) + ".";
+        if (s.size() > fmt.width) s.chop(1);   // "10000." -> "10000"
+    } else {
+        for (int d = fmt.decimals; d >= 0; --d) {
+            s = QString::number(value, 'f', d);
+            if (s.startsWith("0.") && s.size() > fmt.width)  s.remove(0, 1);
+            if (s.startsWith("-0.") && s.size() > fmt.width) s.remove(1, 1);
+            if (s.size() <= fmt.width) break;
+        }
     }
-    return " " + QString("%1").arg(value, fmt.width, 'f', fmt.decimals);
+    if (s.size() > fmt.width)
+        s = QString(fmt.width, '*');   // Fortran-style overflow rather than shifting columns
+    return " " + s.rightJustified(fmt.width, ' ');
 }
 
 QVector<ParamFormat> CulParser::inferFormats(const QVector<CulRow> &rows, int numParams)
@@ -91,10 +104,12 @@ QStringList CulParser::extractParamNames(const QStringList &headerLines)
     return names;
 }
 
-QVector<CulRow> CulParser::parse(const QString &filePath, QStringList &headerLines)
+QVector<CulRow> CulParser::parse(const QString &filePath, QStringList &headerLines,
+                                 QStringList *footerLines)
 {
     QVector<CulRow> rows;
     headerLines.clear();
+    if (footerLines) footerLines->clear();
 
     QFile file(filePath);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
@@ -102,58 +117,46 @@ QVector<CulRow> CulParser::parse(const QString &filePath, QStringList &headerLin
 
     QTextStream in(&file);
     in.setEncoding(QStringConverter::Latin1);
+    // Byte-exact Latin1 round-trip: don't let a UTF-8 BOM switch the decoder,
+    // or non-Latin1 characters (e.g. "˚Cd") are written back as '?'.
+    // The BOM itself is not valid DSSAT input and is dropped.
+    in.setAutoDetectUnicode(false);
+    static const QString utf8Bom = QString::fromLatin1("\xEF\xBB\xBF");
 
+    // Comment and structural lines (* ! @ $) and blank lines keep their place:
+    // before the first data row they go to headerLines (so "!Calibration",
+    // "!Coefficient #", unit lines etc. keep their order); between data rows
+    // (GLUE history, extra "@VAR#" section headers) they are written back just
+    // before the next row (preComment); after the last row they become footerLines.
+    // Data rows are always rewritten in fixed-width format; lines that are
+    // not valid fixed-width data rows are dropped.
     bool inDataSection = false;
-    bool pastAtHeader = false;   // true after @VAR# line seen
-    QString pendingComment;      // accumulates ! lines in data section for next row
-
-    // Structural comment lines that can legitimately appear between @VAR# and
-    // the first data row (e.g. stock DSSAT files pairing "!Coefficient #" with
-    // "!Calibration"). These must stay in headerLines — not be swept into the
-    // next row's preComment — or calibrationTypes()/tooltipsFromHeader() can
-    // no longer find them, and a later header-menu save would insert a
-    // duplicate, incorrect "!Calibration" line instead of updating this one.
-    static const QRegularExpression calibLineRe("^!\\s*[Cc]alibration\\b");
-    static const QRegularExpression coeffNumRe("^!\\s*[Cc]oefficient\\s*#");
+    QStringList pending;
 
     while (!in.atEnd()) {
         QString line = in.readLine();
         // Remove Windows \r if present
         if (line.endsWith('\r')) line.chop(1);
+        if (headerLines.isEmpty() && rows.isEmpty() && line.startsWith(utf8Bom))
+            line.remove(0, utf8Bom.size());
 
-        if (line.isEmpty()) {
-            if (!inDataSection) {
-                headerLines << line;
-            } else if (!rows.isEmpty()) {
-                rows.last().trailingBlank = true;
-            }
+        if (line.trimmed().isEmpty()) {
+            if (!inDataSection)
+                headerLines << QString();
+            else if (pending.isEmpty())
+                ++rows.last().trailingBlanks;
+            else
+                pending << QString();          // blank line inside a comment block
             continue;
         }
 
-        QChar first = line[0];
-
-        // ! lines after @VAR# header are inline history comments for the next data row
-        if (first == '!' && pastAtHeader) {
-            if (calibLineRe.match(line).hasMatch() || coeffNumRe.match(line).hasMatch()) {
-                headerLines << line;
-                continue;
-            }
-            pendingComment += (pendingComment.isEmpty() ? "" : "\n") + line;
-            continue;
-        }
-
-        // Skip / preserve header lines
-        if (first == '*' || first == '!' || first == '@' || first == '$') {
-            if (first == '@') pastAtHeader = true;
-            headerLines << line;
-            pendingComment.clear();
+        if (QString("*!@$").contains(line[0])) {
+            if (inDataSection) pending << line; else headerLines << line;
             continue;
         }
 
         // Data line: must be long enough
         if (line.length() < 36) continue;
-
-        inDataSection = true;
 
         CulRow row;
         row.varNum = line.left(6).trimmed();
@@ -165,6 +168,7 @@ QVector<CulRow> CulParser::parse(const QString &filePath, QStringList &headerLin
         // Extract ECO# from strictly position 30-35 (A6)
         row.ecoNum = line.mid(30, 6).trimmed();
         if (row.ecoNum.isEmpty()) continue;  // Invalid row if no ECO#
+        inDataSection = true;
 
         // Parameters start at position 36 onwards
         QString paramStr = line.mid(36);
@@ -179,10 +183,14 @@ QVector<CulRow> CulParser::parse(const QString &filePath, QStringList &headerLin
         }
 
         row.isMinMax = (row.varNum == "999991" || row.varNum == "999992");
-        row.preComment = pendingComment;
-        pendingComment.clear();
+        row.preComment = pending.join('\n');
+        pending.clear();
         rows << row;
     }
+
+    // Comments after the last data row have no row to attach to — keep them as a footer
+    if (footerLines)
+        *footerLines = pending;
 
     return rows;
 }
@@ -191,13 +199,14 @@ QString CulParser::formatRow(const CulRow &row, const QVector<ParamFormat> &form
 {
     // Fixed-width format from spec:
     // "%-6s %-13s%1s       . %-6s " + formatted params
+    // Every field is truncated to its width so a long value can never shift the columns.
     QString line;
-    line += row.varNum.leftJustified(6, ' ');
+    line += row.varNum.leftJustified(6, ' ', true);
     line += ' ';
-    line += row.vrName.leftJustified(16, ' '); // strict A16 (positions 7-22)
+    line += row.vrName.leftJustified(16, ' ', true); // strict A16 (positions 7-22)
     // 7X region: 6-char content right-justified + mandatory space at pos 29
-    line += row.expNo.trimmed().rightJustified(6, ' ') + ' ';
-    line += row.ecoNum.leftJustified(6, ' ');  // strict A6 (positions 30-35)
+    line += row.expNo.trimmed().rightJustified(6, ' ', true) + ' ';
+    line += row.ecoNum.leftJustified(6, ' ', true);  // strict A6 (positions 30-35)
 
     int actualParams = std::max(numParams, static_cast<int>(row.params.size()));
 
@@ -209,8 +218,10 @@ QString CulParser::formatRow(const CulRow &row, const QVector<ParamFormat> &form
         if (i < row.paramStrs.size() && !row.paramStrs[i].isEmpty()) {
             QString s = row.paramStrs[i].trimmed();
             int dotIdx = s.indexOf('.');
-            if (dotIdx >= 0)
+            if (dotIdx >= 0) {
                 fmt.decimals = s.length() - dotIdx - 1;
+                fmt.trailingDot = (fmt.decimals == 0);   // "240." stays "240."
+            }
         }
         line += formatParam(v, fmt);
     }
@@ -220,19 +231,15 @@ QString CulParser::formatRow(const CulRow &row, const QVector<ParamFormat> &form
 bool CulParser::write(const QString &filePath,
                       const QVector<CulRow> &rows,
                       const QStringList &headerLines,
-                      const QStringList &paramNames)
+                      const QStringList &paramNames,
+                      const QStringList &footerLines)
 {
-    QFile file(filePath);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Text))
-        return false;
-
-    QTextStream out(&file);
-    out.setEncoding(QStringConverter::Latin1);
+    QStringList out;
+    auto put = [&](const QString &s) { out << s; };
 
     // Write header lines first
-    for (const QString &h : headerLines) {
-        out << h << "\n";
-    }
+    for (const QString &h : headerLines)
+        put(h);
 
     // Pre-infer formats for exact rewriting dynamically
     int numParams = paramNames.size();
@@ -246,13 +253,73 @@ bool CulParser::write(const QString &filePath,
     // Write data rows, preserving inline history comments and blank lines
     for (const CulRow &row : rows) {
         if (!row.preComment.isEmpty())
-            out << row.preComment << "\n";
-        out << formatRow(row, formats, numParams) << "\n";
-        if (row.trailingBlank)
-            out << "\n";
+            put(row.preComment);
+        put(formatRow(row, formats, numParams));
+        for (int b = 0; b < row.trailingBlanks; ++b)
+            put(QString());
     }
 
-    return true;
+    for (const QString &f : footerLines)
+        put(f);
+
+    return writeLines(filePath, out);
+}
+
+bool CulParser::writeLines(const QString &filePath, const QStringList &lines)
+{
+    // Keep the line endings of the file being overwritten (DSSAT files are usually
+    // CRLF); new files get the platform default.
+#ifdef Q_OS_WIN
+    QString eol = "\r\n";
+#else
+    QString eol = "\n";
+#endif
+    {
+        QFile existing(filePath);
+        if (existing.open(QIODevice::ReadOnly)) {
+            const QByteArray head = existing.read(64 * 1024);
+            if (head.contains('\n'))
+                eol = head.contains("\r\n") ? "\r\n" : "\n";
+        }
+    }
+
+    QString text;
+    for (const QString &l : lines)
+        text += QString(l).replace('\n', eol) + eol;   // a line may hold several (preComment)
+
+    const QByteArray bytes = text.toLatin1();
+    QFile file(filePath);
+    if (!file.open(QIODevice::WriteOnly))   // binary: eol is already in the text
+        return false;
+    return file.write(bytes) == bytes.size();
+}
+
+QString CulParser::nextFreeId(const QString &srcId, const QStringList &existing)
+{
+    // Letter prefix = leading non-digits; keep at least 2 digits of room in 6 chars
+    QString prefix = srcId.trimmed().toUpper();
+    int p = 0;
+    while (p < prefix.size() && !prefix[p].isDigit()) ++p;
+    prefix = prefix.left(qMin(p, 4));
+    if (prefix.isEmpty()) prefix = "XX";
+    const int digits = 6 - prefix.size();
+
+    int maxNum = 0;
+    for (const QString &id : existing) {
+        if (!id.startsWith(prefix, Qt::CaseInsensitive) || id.size() != 6) continue;
+        bool ok;
+        int n = id.mid(prefix.size()).toInt(&ok);
+        if (ok && n > maxNum) maxNum = n;
+    }
+
+    int limit = 1;
+    for (int i = 0; i < digits; ++i) limit *= 10;
+    for (int n = maxNum + 1; n < maxNum + limit; ++n) {
+        QString id = prefix + QString::number(n % limit).rightJustified(digits, '0');
+        if (!existing.contains(id, Qt::CaseInsensitive))
+            return id;
+    }
+    return prefix + QString(digits, '9');
 }
 
 CulRow CulParser::parseLine(const QString &rawLine)

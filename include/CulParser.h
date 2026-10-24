@@ -29,7 +29,7 @@ struct CulRow {
     QVector<QString> paramStrs;                  // Original unparsed strings for exact reproduction
     bool isMinMax = false;                       // true if varNum == "999991" or "999992"
     int fWidth = 6;                              // Inferred fixed-width format (e.g. 6 or 15)
-    bool trailingBlank = false;                  // true if a blank line followed this row in the source file
+    int trailingBlanks = 0;                      // number of blank lines that followed this row in the source file
     QString preComment;                          // inline history comment written before this row
 };
 
@@ -37,13 +37,19 @@ class CulParser
 {
 public:
     // Parse a .CUL file. headerLines receives *, !, @ lines in order.
-    static QVector<CulRow> parse(const QString &filePath, QStringList &headerLines);
+    // footerLines (optional) receives ! comment lines after the last data row.
+    static QVector<CulRow> parse(const QString &filePath, QStringList &headerLines,
+                                 QStringList *footerLines = nullptr);
 
     // Write rows back to filePath using fixed-width format and inferred decimal counts.
     static bool write(const QString &filePath,
                       const QVector<CulRow> &rows,
                       const QStringList &headerLines,
-                      const QStringList &paramNames);
+                      const QStringList &paramNames,
+                      const QStringList &footerLines = {});
+
+    // Write lines (Latin1) using the line endings of the file being replaced.
+    static bool writeLines(const QString &filePath, const QStringList &lines);
 
     // Format one CUL data row as a fixed-width string using pre-inferred formats.
     static QString formatRow(const CulRow &row, const QVector<ParamFormat> &formats, int numParams);
@@ -61,6 +67,10 @@ public:
     // into a map of  variableName -> description.
     // Works for both .CUL and .ECO header lines.
     static QMap<QString, QString> tooltipsFromHeader(const QStringList &headerLines);
+
+    // Return a 6-char ID not in `existing`, keeping srcId's letter prefix and
+    // incrementing its number (IB0488 -> IB1501 if IB1500 is the highest IB id).
+    static QString nextFreeId(const QString &srcId, const QStringList &existing);
 
     // Parse a single CUL data line (e.g. pasted from GLUE output).
     // Returns a row with varNum.isEmpty() == true on failure.

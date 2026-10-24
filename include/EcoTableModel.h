@@ -4,7 +4,6 @@
 #include <QAbstractTableModel>
 #include <QVector>
 #include <QMap>
-#include <optional>
 #include "EcoParser.h"
 
 class EcoTableModel : public QAbstractTableModel
@@ -14,8 +13,9 @@ class EcoTableModel : public QAbstractTableModel
 public:
     explicit EcoTableModel(QObject *parent = nullptr);
 
-    void setRows(const QVector<EcoRow> &rows);
+    void setRows(const QVector<EcoRow> &rows, const EcoLayout &layout);
     QVector<EcoRow> rows() const { return m_rows; }
+    const EcoLayout &layout() const { return m_layout; }
 
     // Count how many CUL rows reference each ECO#
     void setCulCrossRef(const QMap<QString, int> &refCounts) { m_refCounts = refCounts; }
@@ -29,21 +29,17 @@ public:
     bool setData(const QModelIndex &index, const QVariant &value,
                  int role = Qt::EditRole) override;
 
-    void addRow(const QString &ecoName = "NEW ECOTYPE");
-    void addRowWithData(const QString &ecoName, const QString &mg, const QString &tm);
-    void addRowWithFullData(const QString &ecoName, const QString &mg, const QString &tm, const QVector<std::optional<double>> &params);
+    // vals: one string per layout column (missing ones are written as -99 / ".")
+    void addRowWithFullData(const QString &ecoName, const QStringList &vals);
     void duplicateRow(int row);
     void deleteRow(int row);
 
     static const int COL_ECONUM  = 0;
     static const int COL_ECONAME = 1;
-    static const int COL_MG      = 2;
-    static const int COL_TM      = 3;
-    static const int COL_REFS    = 4;   // # of cultivars using this ECO
-    static const int COL_PARAM0  = 5;
-    static const int TOTAL_COLS  = 21;  // 5 fixed + 16 params
+    static const int COL_REFS    = 2;   // # of cultivars using this ECO
+    static const int COL_PARAM0  = 3;
 
-    static QString columnName(int col);
+    QString columnName(int col) const;
     void setColumnTooltips(const QMap<QString, QString> &tips) { m_tips = tips; }
 
 signals:
@@ -52,6 +48,7 @@ signals:
 private:
     QString generateUniqueEcoNum() const;
     QVector<EcoRow> m_rows;
+    EcoLayout m_layout;
     QMap<QString, int> m_refCounts;
     QMap<QString, QString> m_tips;
 };

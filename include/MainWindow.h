@@ -149,7 +149,9 @@ private:
     QString m_currentEcoPath;
     QString m_currentSpePath;
     QStringList m_culHeaderLines;
+    QStringList m_culFooterLines;   // ! comment lines after the last data row
     QStringList m_ecoHeaderLines;
+    QStringList m_ecoFooterLines;   // ! comment lines after the last data row
 };
 
 #endif // MAINWINDOW_H

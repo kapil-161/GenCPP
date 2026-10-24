@@ -11,13 +11,15 @@ QString SpeEditor::load(const QString &filePath)
 
     QTextStream in(&file);
     in.setEncoding(QStringConverter::Latin1);
+    in.setAutoDetectUnicode(false);   // byte-exact Latin1, same as CulParser/EcoParser
     return in.readAll();
 }
 
 bool SpeEditor::save(const QString &filePath, const QString &text)
 {
     QFile file(filePath);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Text))
+    // Binary mode: we write \r\n ourselves (Text mode would make it \r\r\n on Windows)
+    if (!file.open(QIODevice::WriteOnly))
         return false;
 
     QTextStream out(&file);

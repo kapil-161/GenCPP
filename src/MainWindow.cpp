@@ -424,7 +424,10 @@ void MainWindow::setupCulTab(QWidget *tab)
             QVector<ParamFormat> fmts = CulParser::inferFormats(m_culModel->rows(), numParams);
             QString oldLine = CulParser::formatRow(m_culModel->rows().at(culRow), fmts, numParams);
             QString ts = QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm");
-            m_culModel->setRowPreComment(culRow, "! " + ts + " " + oldLine.trimmed());
+            // Append below any existing comment (earlier history, author notes) — don't replace it
+            const QString prev = m_culModel->rows().at(culRow).preComment;
+            const QString hist = "! " + ts + " " + oldLine.trimmed();
+            m_culModel->setRowPreComment(culRow, prev.isEmpty() ? hist : prev + "\n" + hist);
         }
 
         // Parse and apply params — fixed-width: VARNUM(6) SP VRNAME(16) EXPNO(7) ECO(6) SP params
@@ -444,7 +447,7 @@ void MainWindow::setupCulTab(QWidget *tab)
             int n = m_culModel->columnCount() - CulTableModel::COL_PARAM0;
             for (int i = 0; i < n; ++i)
                 pNames << m_culModel->columnName(CulTableModel::COL_PARAM0 + i);
-            CulParser::write(m_currentCulPath, m_culModel->rows(), m_culHeaderLines, pNames);
+            CulParser::write(m_currentCulPath, m_culModel->rows(), m_culHeaderLines, pNames, m_culFooterLines);
             m_culDirty = false;
             setStatus(QString("GLUE calibration applied and saved for %1").arg(varNum));
         } else {
@@ -710,7 +713,7 @@ void MainWindow::loadFileType(const QString &fileType)
 
     if (fileType == "CUL") {
         m_culHeaderLines.clear();
-        QVector<CulRow> culRows = CulParser::parse(m_currentCulPath, m_culHeaderLines);
+        QVector<CulRow> culRows = CulParser::parse(m_currentCulPath, m_culHeaderLines, &m_culFooterLines);
         QStringList paramNames = CulParser::extractParamNames(m_culHeaderLines);
         m_culModel->setParamNames(paramNames.isEmpty() ? CUL_PARAM_NAMES : paramNames);
         m_culModel->setRows(culRows);
@@ -722,7 +725,11 @@ void MainWindow::loadFileType(const QString &fileType)
 
         if (!m_currentEcoPath.isEmpty() && m_ecoModel->rows().isEmpty()) {
             m_ecoHeaderLines.clear();
-            m_ecoModel->setRows(EcoParser::parse(m_currentEcoPath, m_ecoHeaderLines));
+            {
+                EcoLayout lay;
+                QVector<EcoRow> er = EcoParser::parse(m_currentEcoPath, m_ecoHeaderLines, &m_ecoFooterLines, &lay);
+                m_ecoModel->setRows(er, lay);
+            }
             m_ecoModel->setColumnTooltips(CulParser::tooltipsFromHeader(m_ecoHeaderLines));
             m_ecoDirty = false;
             refreshEcoCrossRef();
@@ -775,8 +782,9 @@ void MainWindow::loadFileType(const QString &fileType)
         }
     } else if (fileType == "ECO") {
         m_ecoHeaderLines.clear();
-        QVector<EcoRow> ecoRows = EcoParser::parse(m_currentEcoPath, m_ecoHeaderLines);
-        m_ecoModel->setRows(ecoRows);
+        EcoLayout ecoLayout;
+        QVector<EcoRow> ecoRows = EcoParser::parse(m_currentEcoPath, m_ecoHeaderLines, &m_ecoFooterLines, &ecoLayout);
+        m_ecoModel->setRows(ecoRows, ecoLayout);
         m_ecoModel->setColumnTooltips(CulParser::tooltipsFromHeader(m_ecoHeaderLines));
         m_ecoDirty = false;
         refreshEcoCrossRef();
@@ -933,7 +941,7 @@ void MainWindow::onCulSave()
         paramNames << m_culModel->columnName(CulTableModel::COL_PARAM0 + i);
     }
 
-    if (CulParser::write(m_currentCulPath, m_culModel->rows(), m_culHeaderLines, paramNames)) {
+    if (CulParser::write(m_currentCulPath, m_culModel->rows(), m_culHeaderLines, paramNames, m_culFooterLines)) {
         m_culDirty = false;
         setStatus("CUL saved: " + m_currentCulPath);
     } else {
@@ -957,7 +965,7 @@ void MainWindow::onEcoCopyRow()
     QModelIndex idx = m_ecoProxy->mapToSource(m_ecoView->currentIndex());
     if (!idx.isValid()) return;
     const EcoRow &row = m_ecoModel->rows().at(idx.row());
-    QApplication::clipboard()->setText(EcoParser::formatRow(row));
+    QApplication::clipboard()->setText(EcoParser::formatRow(row, m_ecoModel->layout()));
     setStatus(QString("Copied ecotype %1 to clipboard").arg(row.ecoNum));
 }
 
@@ -1000,7 +1008,10 @@ void MainWindow::onCulPasteGlue()
         src->setData(idx(CulTableModel::COL_EXPNO),  newRow.expNo);
         src->setData(idx(CulTableModel::COL_ECONUM), newRow.ecoNum);
         for (int p = 0; p < newRow.params.size(); ++p) {
-            QVariant val = newRow.params[p].has_value() ? QVariant(newRow.params[p].value()) : QVariant();
+            // pass the pasted text, so GLUE precision ("3.500") is kept on save
+            QVariant val = !newRow.params[p].has_value() ? QVariant()
+                         : p < newRow.paramStrs.size() ? QVariant(newRow.paramStrs[p])
+                                                       : QVariant(newRow.params[p].value());
             src->setData(idx(CulTableModel::COL_PARAM0 + p), val);
         }
 
@@ -1022,7 +1033,10 @@ void MainWindow::onCulPasteGlue()
         src->setData(idx(CulTableModel::COL_EXPNO),  newRow.expNo);
         src->setData(idx(CulTableModel::COL_ECONUM), newRow.ecoNum);
         for (int p = 0; p < newRow.params.size(); ++p) {
-            QVariant val = newRow.params[p].has_value() ? QVariant(newRow.params[p].value()) : QVariant();
+            // pass the pasted text, so GLUE precision ("3.500") is kept on save
+            QVariant val = !newRow.params[p].has_value() ? QVariant()
+                         : p < newRow.paramStrs.size() ? QVariant(newRow.paramStrs[p])
+                                                       : QVariant(newRow.params[p].value());
             src->setData(idx(CulTableModel::COL_PARAM0 + p), val);
         }
 
@@ -1039,7 +1053,7 @@ void MainWindow::onCulRefresh()
     // Reload CUL
     if (!m_currentCulPath.isEmpty()) {
         m_culHeaderLines.clear();
-        QVector<CulRow> culRows = CulParser::parse(m_currentCulPath, m_culHeaderLines);
+        QVector<CulRow> culRows = CulParser::parse(m_currentCulPath, m_culHeaderLines, &m_culFooterLines);
         QStringList paramNames = CulParser::extractParamNames(m_culHeaderLines);
         m_culModel->setParamNames(paramNames.isEmpty() ? CUL_PARAM_NAMES : paramNames);
         m_culModel->setRows(culRows);
@@ -1051,7 +1065,11 @@ void MainWindow::onCulRefresh()
     // Reload ECO
     if (!m_currentEcoPath.isEmpty()) {
         m_ecoHeaderLines.clear();
-        m_ecoModel->setRows(EcoParser::parse(m_currentEcoPath, m_ecoHeaderLines));
+        {
+                EcoLayout lay;
+                QVector<EcoRow> er = EcoParser::parse(m_currentEcoPath, m_ecoHeaderLines, &m_ecoFooterLines, &lay);
+                m_ecoModel->setRows(er, lay);
+            }
         m_ecoModel->setColumnTooltips(CulParser::tooltipsFromHeader(m_ecoHeaderLines));
         m_ecoDirty = false;
         refreshEcoCrossRef();
@@ -1081,10 +1099,17 @@ void MainWindow::onCulRefresh()
             if (row.params[i].has_value()) {
                 double v = row.params[i].value();
                 if (!std::isfinite(v))
-                    issues << row.varNum + ": param " + CUL_PARAM_NAMES[i] + " is not finite";
+                    issues << row.varNum + ": param "
+                              + m_culModel->columnName(CulTableModel::COL_PARAM0 + i) + " is not finite";
             }
         }
     }
+
+    for (const auto &er : m_ecoModel->rows())
+        if (er.misaligned)
+            issues << "ECO " + er.ecoNum + ": row is not in DSSAT fixed-width format in the file"
+                      " (values off their columns or name longer than 16 chars) — check it;"
+                      " saving rewrites it in fixed-width format";
 
     if (issues.isEmpty()) {
         QMessageBox::information(this, "Refresh", "Files reloaded — no issues found.");
@@ -1171,71 +1196,47 @@ void MainWindow::onCulShowUsed(bool checked)
 void MainWindow::onEcoAdd()  
 { 
     bool ok;
-    
-    // Ask for ECONAME
-    QString ecoName = QInputDialog::getText(this, "New Ecotype",
-        "Enter ecotype name (ECONAME):", QLineEdit::Normal,
-        "NEW ECOTYPE", &ok);
-    if (!ok || ecoName.isEmpty()) return;
-    
-    // Ask for MG
-    QString mg = QInputDialog::getText(this, "New Ecotype",
-        "Enter maturity group (MG):", QLineEdit::Normal,
-        " 0", &ok);
-    if (!ok) return;
-    
-    // Ask for TM
-    QString tm = QInputDialog::getText(this, "New Ecotype",
-        "Enter temperature modifier (TM):", QLineEdit::Normal,
-        " 0", &ok);
-    if (!ok) return;
-    
-    // Ask for each numeric parameter with skip button
-    QVector<std::optional<double>> params(16);
-    
-    for (int i = 0; i < ECO_PARAM_NAMES.size(); ++i) {
-        QDialog dialog(this);
-        dialog.setWindowTitle("New Ecotype Parameters");
-        
-        QVBoxLayout *layout = new QVBoxLayout(&dialog);
-        
-        QLabel *label = new QLabel("Enter " + ECO_PARAM_NAMES[i] + ":");
-        layout->addWidget(label);
-        
-        QLineEdit *lineEdit = new QLineEdit();
-        lineEdit->setText("0");
-        lineEdit->selectAll();
-        layout->addWidget(lineEdit);
-        
-        QHBoxLayout *buttonLayout = new QHBoxLayout();
-        QPushButton *addBtn = new QPushButton("Add");
-        QPushButton *skipBtn = new QPushButton("Skip");
-        buttonLayout->addWidget(addBtn);
-        buttonLayout->addWidget(skipBtn);
-        layout->addLayout(buttonLayout);
-        
-        bool accepted = false;
-        connect(addBtn, &QPushButton::clicked, [&]() {
-            params[i] = lineEdit->text().toDouble();
-            accepted = true;
-            dialog.accept();
-        });
-        
-        connect(skipBtn, &QPushButton::clicked, [&]() {
-            // Leave remaining as nullopt (no value)
-            dialog.reject();
-        });
-        
-        int result = dialog.exec();
-        if (result == QDialog::Rejected) {
-            // Skip was clicked - remaining params stay as nullopt
-            break;
-        }
+    const EcoLayout &lay = m_ecoModel->layout();
+    if (lay.names.isEmpty()) {
+        setStatus("ECO file has no @ECO# column header — cannot add an ecotype.", true);
+        return;
     }
-    
+
+    // Ask for ECONAME (only if this model's ECO file has the column)
+    QString ecoName;
+    if (lay.hasName) {
+        ecoName = QInputDialog::getText(this, "New Ecotype",
+            "Enter ecotype name (ECONAME, max 16 chars):", QLineEdit::Normal,
+            "NEW ECOTYPE", &ok);
+        if (!ok || ecoName.trimmed().isEmpty()) return;
+    }
+
+    // Ask for each column in file order. Values must fit the column; Cancel stops,
+    // and the remaining columns are written as missing (-99, or "." for text columns).
+    QStringList vals;
+    for (int i = 0; i < lay.names.size(); ++i) {
+        const int maxLen = lay.width(i) - 1;
+        QString v;
+        for (;;) {
+            v = QInputDialog::getText(this, "New Ecotype",
+                QString("Enter %1 (%2, max %3 chars) — Cancel to leave the rest missing:")
+                    .arg(lay.names[i], lay.numeric[i] ? "number" : "text").arg(maxLen),
+                QLineEdit::Normal, lay.numeric[i] ? "-99" : ".", &ok).trimmed();
+            if (!ok) break;
+            bool num = true;
+            if (lay.numeric[i]) v.toDouble(&num);
+            if (num && !v.isEmpty() && !v.contains(' ') && v.size() <= maxLen) break;
+            QMessageBox::warning(this, "New Ecotype",
+                QString("%1 must be a single %2 of at most %3 characters.")
+                    .arg(lay.names[i], lay.numeric[i] ? "number" : "word").arg(maxLen));
+        }
+        if (!ok) break;
+        vals << v;
+    }
+
     // Create row with all user-provided values
     int newRow = m_ecoModel->rowCount();
-    m_ecoModel->addRowWithFullData(ecoName, mg, tm, params);
+    m_ecoModel->addRowWithFullData(ecoName, vals);
     m_ecoDirty = true;
     
     // Focus on the new row
@@ -1276,7 +1277,8 @@ void MainWindow::onEcoSave()
     if (m_currentEcoPath.isEmpty()) return;
     BackupManager::createBackup(m_currentEcoPath);
     BackupManager::pruneBackups(m_currentEcoPath);
-    if (EcoParser::write(m_currentEcoPath, m_ecoModel->rows(), m_ecoHeaderLines)) {
+    if (EcoParser::write(m_currentEcoPath, m_ecoModel->rows(), m_ecoHeaderLines,
+                         m_ecoModel->layout(), m_ecoFooterLines)) {
         m_ecoDirty = false;
         setStatus("ECO saved: " + m_currentEcoPath);
     } else {

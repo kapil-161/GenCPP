@@ -141,7 +141,7 @@ int CommandLineHandler::runTests()
         int badPos29 = 0, badEco = 0, rows_checked = 0;
         while (!in.atEnd()) {
             QString line = in.readLine();
-            if (line.isEmpty() || QString("!*@$").contains(line[0])) continue;
+            if (line.trimmed().isEmpty() || QString("!*@$").contains(line[0])) continue;
             if (line.length() < 36) continue;
             ++rows_checked;
             if (line[29] != ' ') ++badPos29;
@@ -186,25 +186,88 @@ int CommandLineHandler::runTests()
     {
         QDir geno(GENOTYPE);
         QStringList culFiles = geno.entryList({"*.CUL"}, QDir::Files);
-        int total = 0, failed = 0;
+        auto commentLines = [](const QString &path) {
+            QStringList out;
+            QFile f(path);
+            if (f.open(QIODevice::ReadOnly | QIODevice::Text))
+                for (const QString &l : QString::fromLatin1(f.readAll()).split('\n'))
+                    if (l.startsWith('!')) out << QString(l).remove('\r');
+            return out;
+        };
+        int total = 0, failed = 0, lostComments = 0, badFormat = 0;
         for (const QString &fn : culFiles) {
             QString src = GENOTYPE + "/" + fn;
-            QStringList hdr;
-            QVector<CulRow> rows = CulParser::parse(src, hdr);
+            QStringList hdr, ftr;
+            QVector<CulRow> rows = CulParser::parse(src, hdr, &ftr);
             if (rows.isEmpty()) continue; // skip empty/unrecognised
             ++total;
             QStringList paramNames = CulParser::extractParamNames(hdr);
             QString dst = tmp.filePath(fn + ".rt");
-            if (!CulParser::write(dst, rows, hdr, paramNames)) { ++failed; continue; }
+            QFile::copy(src, dst);   // overwrite a copy, as the editor does (keeps EOL style)
+            if (!CulParser::write(dst, rows, hdr, paramNames, ftr)) { ++failed; continue; }
             QStringList hdr2;
             QVector<CulRow> rows2 = CulParser::parse(dst, hdr2);
             if (rows2.size() != rows.size()) ++failed;
+
+            // Every written data row must be strict fixed width: each parameter field is
+            // exactly W chars, starts with a space, is right-aligned, and keeps its value.
+            {
+                const int numParams = paramNames.isEmpty() ? (rows.isEmpty() ? 0 : rows[0].params.size())
+                                                           : paramNames.size();
+                const QVector<ParamFormat> fmts = CulParser::inferFormats(rows, numParams);
+                const int W = fmts.isEmpty() ? 6 : fmts[0].width + 1;
+                QFile f(dst);
+                f.open(QIODevice::ReadOnly);
+                int r = 0;
+                for (QString line : QString::fromLatin1(f.readAll()).split('\n')) {
+                    line.remove('\r');
+                    if (line.trimmed().isEmpty() || QString("*!@$").contains(line[0])) continue;
+                    if (r >= rows.size()) break;
+                    QString why;
+                    if (line[6] != ' ' || line[29] != ' ') why = "pos 6/29 not space";
+                    const int n = qMax(numParams, (int)rows[r].params.size());
+                    if (why.isEmpty() && line.size() != 36 + n * W)
+                        why = QString("length %1, expected %2").arg(line.size()).arg(36 + n * W);
+                    for (int i = 0; why.isEmpty() && i < n; ++i) {
+                        const QString fld = line.mid(36 + i * W, W);
+                        if (fld[0] != ' ' || fld.endsWith(' ') || fld.contains('*'))
+                            why = QString("field %1 \"%2\" not right-aligned").arg(i + 1).arg(fld);
+                        const double orig = i < rows[r].params.size() && rows[r].params[i] ? *rows[r].params[i] : 0.0;
+                        const QString t = fld.trimmed();
+                        const int d = t.contains('.') ? t.size() - t.indexOf('.') - 1 : 0;
+                        if (why.isEmpty() && std::abs(t.toDouble() - orig) > 0.5 * std::pow(10.0, -d) + 1e-9)
+                            why = QString("field %1 value %2 != %3").arg(i + 1).arg(t).arg(orig);
+                    }
+                    if (!why.isEmpty()) {
+                        ++badFormat;
+                        fprintf(stderr, "  %s: %s\n    %s\n", qPrintable(fn), qPrintable(why),
+                                qPrintable(line.left(110)));
+                        break;
+                    }
+                    ++r;
+                }
+            }
+            const QStringList before = commentLines(src), after = commentLines(dst);
+            if (before != after) {
+                ++lostComments;
+                int i = 0;
+                while (i < before.size() && i < after.size() && before[i] == after[i]) ++i;
+                fprintf(stderr, "  %s: ! comment lines changed (%lld -> %lld) at #%d\n"
+                                "    was: %s\n    now: %s\n",
+                        qPrintable(fn), (long long)before.size(), (long long)after.size(), i + 1,
+                        qPrintable(i < before.size() ? before[i] : "<none>"),
+                        qPrintable(i < after.size() ? after[i] : "<none>"));
+            }
         }
         check(total > 0, qPrintable(QString("found %1 CUL files").arg(total)));
         check(failed == 0,
               qPrintable(QString("all %1 CUL files round-trip without row-count change").arg(total)));
         if (failed > 0)
             fprintf(stderr, "  (%d files failed)\n", failed);
+        check(lostComments == 0,
+              qPrintable(QString("all %1 CUL files keep every ! comment line").arg(total)));
+        check(badFormat == 0,
+              qPrintable(QString("all %1 CUL files write strict fixed-width, right-aligned rows").arg(total)));
     }
 
     // ── 6. EcoParser: dollar-sign header preserved ────────────────────────────
@@ -225,10 +288,11 @@ int CommandLineHandler::runTests()
     fprintf(stdout, "\n[ EcoParser: round-trip write/parse ]\n");
     {
         QString src = GENOTYPE + "/WHCER048.ECO";
-        QStringList hdr;
-        QVector<EcoRow> rows = EcoParser::parse(src, hdr);
+        QStringList hdr, ftr;
+        EcoLayout lay;
+        QVector<EcoRow> rows = EcoParser::parse(src, hdr, &ftr, &lay);
         QString dst = tmp.filePath("WHCER048_rt.ECO");
-        bool wrote = EcoParser::write(dst, rows, hdr);
+        bool wrote = EcoParser::write(dst, rows, hdr, lay, ftr);
         check(wrote, "ECO write() returned true");
 
         QStringList hdr2;
@@ -246,22 +310,124 @@ int CommandLineHandler::runTests()
     {
         QDir geno(GENOTYPE);
         QStringList ecoFiles = geno.entryList({"*.ECO"}, QDir::Files);
-        int total = 0, failed = 0;
+        auto commentLines = [](const QString &path) {
+            QStringList out;
+            QFile f(path);
+            if (f.open(QIODevice::ReadOnly | QIODevice::Text))
+                for (const QString &l : QString::fromLatin1(f.readAll()).split('\n'))
+                    if (l.startsWith('!')) out << QString(l).remove('\r');
+            return out;
+        };
+        int total = 0, failed = 0, lostComments = 0, changedVals = 0, badFormat = 0, misalignedRows = 0;
         for (const QString &fn : ecoFiles) {
             QString src = GENOTYPE + "/" + fn;
-            QStringList hdr;
-            QVector<EcoRow> rows = EcoParser::parse(src, hdr);
+            QStringList hdr, ftr;
+            EcoLayout lay;
+            QVector<EcoRow> rows = EcoParser::parse(src, hdr, &ftr, &lay);
             if (rows.isEmpty()) continue;
             ++total;
             QString dst = tmp.filePath(fn + ".rt");
-            if (!EcoParser::write(dst, rows, hdr)) { ++failed; continue; }
+            QFile::copy(src, dst);
+            if (!EcoParser::write(dst, rows, hdr, lay, ftr)) { ++failed; continue; }
             QStringList hdr2;
-            QVector<EcoRow> rows2 = EcoParser::parse(dst, hdr2);
-            if (rows2.size() != rows.size()) ++failed;
+            EcoLayout lay2;
+            QVector<EcoRow> rows2 = EcoParser::parse(dst, hdr2, nullptr, &lay2);
+            if (rows2.size() != rows.size()) { ++failed; continue; }
+
+            if (commentLines(src) != commentLines(dst)) {
+                ++lostComments;
+                fprintf(stderr, "  %s: ! comment lines changed\n", qPrintable(fn));
+            }
+            // Same IDs, names and values (numbers compared by value); same column layout
+            auto sameVals = [](const QStringList &a, const QStringList &b) {
+                if (a.size() != b.size()) return false;
+                for (int i = 0; i < a.size(); ++i) {
+                    bool okA, okB;
+                    const double x = a[i].toDouble(&okA), y = b[i].toDouble(&okB);
+                    if (okA && okB ? std::abs(x - y) > 1e-9 : a[i] != b[i]) return false;
+                }
+                return true;
+            };
+            for (int r = 0; r < rows.size(); ++r) {
+                if (rows[r].misaligned) {   // not valid fixed-width in the source; reported, not compared
+                    ++misalignedRows;
+                    fprintf(stdout, "  note: %s %s is not fixed-width in the source file\n",
+                            qPrintable(fn), qPrintable(rows[r].ecoNum));
+                    continue;
+                }
+                if (rows[r].ecoNum != rows2[r].ecoNum || rows[r].ecoName != rows2[r].ecoName
+                    || !sameVals(rows[r].vals, rows2[r].vals)) {
+                    ++changedVals;
+                    fprintf(stderr, "  %s: row %s changed\n    was: %s\n    now: %s\n", qPrintable(fn),
+                            qPrintable(rows[r].ecoNum), qPrintable(rows[r].vals.join(' ')),
+                            qPrintable(rows2[r].vals.join(' ')));
+                    break;
+                }
+            }
+            if (lay.ends != lay2.ends) {
+                ++badFormat;
+                fprintf(stderr, "  %s: column layout changed after save\n", qPrintable(fn));
+            }
+            // Every written data row: each value right-aligned to its column edge
+            for (const EcoRow &row : rows) {
+                const QString line = EcoParser::formatRow(row, lay);
+                QString why;
+                const int n = qMin(int(row.vals.size()), int(lay.ends.size()));
+                for (int c = 0; why.isEmpty() && c < n; ++c) {
+                    const QString fld = line.mid(lay.ends[c] - lay.width(c), lay.width(c));
+                    if (fld.size() != lay.width(c) || fld[0] != ' ' || fld.endsWith(' '))
+                        why = QString("column %1 \"%2\" not right-aligned").arg(lay.names[c], fld);
+                }
+                if (why.isEmpty() && n > 0 && line.size() != lay.ends[n - 1])
+                    why = QString("length %1, expected %2").arg(line.size()).arg(lay.ends[n - 1]);
+                if (!why.isEmpty()) {
+                    ++badFormat;
+                    fprintf(stderr, "  %s: %s\n    %s\n", qPrintable(fn), qPrintable(why),
+                            qPrintable(line.left(110)));
+                    break;
+                }
+            }
         }
         check(total > 0, qPrintable(QString("found %1 ECO files").arg(total)));
         check(failed == 0,
               qPrintable(QString("all %1 ECO files round-trip without row-count change").arg(total)));
+        check(lostComments == 0,
+              qPrintable(QString("all %1 ECO files keep every ! comment line").arg(total)));
+        check(changedVals == 0,
+              qPrintable(QString("all %1 ECO files keep every ID, name and value").arg(total)));
+        check(badFormat == 0,
+              qPrintable(QString("all %1 ECO files write strict fixed-width, right-aligned rows").arg(total)));
+    }
+
+    // ── 8a. CulParser: formatParam is always exactly width+1, right-aligned ──
+    fprintf(stdout, "\n[ CulParser: formatParam fixed width ]\n");
+    {
+        ParamFormat f; f.width = 5; f.decimals = 3;
+        check(CulParser::formatParam(-0.006, f) == " -.006", "-0.006 (3 dec) -> \" -.006\"");
+        check(CulParser::formatParam(0.200, f)  == " 0.200", "0.2 (3 dec) -> \" 0.200\"");
+        f.decimals = 1;
+        check(CulParser::formatParam(12345.678, f) == " 12346", "12345.678 (1 dec) -> \" 12346\"");
+        check(CulParser::formatParam(2.5, f) == "   2.5", "2.5 (1 dec) -> \"   2.5\"");
+        f.trailingDot = true; f.decimals = 0;
+        check(CulParser::formatParam(240, f) == "  240.", "240 (trailing dot) -> \"  240.\"");
+        f.trailingDot = false; f.decimals = 2; f.width = 14;
+        check(CulParser::formatParam(5.7, f) == QString(" ") + QString("5.70").rightJustified(14),
+              "wide (15-char) field stays 15 chars");
+    }
+
+    // ── 8b. CulParser: nextFreeId keeps 6-char IDs ───────────────────────────
+    fprintf(stdout, "\n[ CulParser: nextFreeId ]\n");
+    {
+        QStringList ids = {"999991", "999992", "IB0001", "IB0488", "IB1500", "AW0071", "C00001"};
+        check(CulParser::nextFreeId("IB0488", ids) == "IB1501", "IB0488 -> IB1501");
+        check(CulParser::nextFreeId("C00001", ids) == "C00002", "C00001 -> C00002");
+        check(CulParser::nextFreeId("DFAULT", ids).size() == 6, "DFAULT -> 6-char id");
+        bool allSix = true;
+        for (const QString &s : ids) {
+            QString id = CulParser::nextFreeId(s, ids);
+            if (id.size() != 6 || ids.contains(id)) allSix = false;
+        }
+        check(allSix, "every generated id is 6 chars and unused");
     }
 
     // ── 9. CulParser: expNo region format ─────────────────────────────────────
@@ -360,7 +526,7 @@ int CommandLineHandler::runGlue(const CommandLineArgs &a)
     int totalTreatments = 0;
     for (const auto &list : scan.treatments) totalTreatments += list.size();
     fprintf(stdout, "Found %d treatment(s) across %d file(s)\n",
-            totalTreatments, scan.treatments.size());
+            totalTreatments, static_cast<int>(scan.treatments.size()));
     for (auto it = scan.treatments.begin(); it != scan.treatments.end(); ++it) {
         for (const TreatmentEntry &e : it.value())
             fprintf(stdout, "  %s  trt %d\n",

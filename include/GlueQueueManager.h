@@ -5,6 +5,7 @@
 #include <QList>
 #include <QProcess>
 #include <QTimer>
+#include <QDateTime>
 #include "DssatProParser.h"
 #include "GlueRunner.h"
 
@@ -65,6 +66,7 @@ private:
     int       m_lastLine      = 0;
     int       m_glueRound     = 0;
     QString   m_stderrBuf;
+    QDateTime m_runStart;      // to tell this run's ErrorFrame.txt from an old one
 };
 
 #endif // GLUEQUEUEMANAGER_H

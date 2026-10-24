@@ -82,8 +82,10 @@ void GlueQueuePanel::refresh()
 
         m_table->setItem(i, 0, new QTableWidgetItem(e.cultivarId));
         m_table->setItem(i, 1, new QTableWidgetItem(e.cultivarName));
+        int nTrt = 0;   // selectedTreatments maps experiment file -> its treatments
+        for (const auto &list : e.selectedTreatments) nTrt += list.size();
         m_table->setItem(i, 2, new QTableWidgetItem(
-            QString("%1 treatment(s)").arg(e.selectedTreatments.size())));
+            QString("%1 treatment(s)").arg(nTrt)));
         m_table->setItem(i, 3, new QTableWidgetItem(QString::number(e.runs)));
 
         QString modeStr;

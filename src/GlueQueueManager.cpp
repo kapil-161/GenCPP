@@ -75,6 +75,7 @@ void GlueQueueManager::runNext()
 
     GlueQueueEntry &entry = m_entries[m_currentIndex];
     entry.status = GlueQueueStatus::Running;
+    m_runStart = QDateTime::currentDateTime();
     emit queueChanged();
     emit entryStarted(m_currentIndex);
 
@@ -203,11 +204,39 @@ void GlueQueueManager::onGlueFinished(int exitCode)
         cf.close();
     }
 
-    bool success = (exitCode == 0) && !culLine.isEmpty();
+    // GLUE.r finishes "successfully" even when DSSAT failed in every worker
+    // (e.g. an invalid CUL entry): its posterior is then meaningless.
+    QString modelError;
+    {
+        QFile ef(GlueRunner::GLUE_WORK + "/ErrorFrame.txt");
+        const QDir work(GlueRunner::GLUE_WORK);
+        const QStringList cores = work.entryList({"core_*"}, QDir::Dirs | QDir::NoDotAndDotDot);
+        if (!cores.isEmpty() && QFileInfo(ef).lastModified() >= m_runStart.addSecs(-1)
+            && ef.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            const QString text = QString::fromLatin1(ef.readAll());
+            int failedCores = 0;
+            for (const QString &c : cores)
+                if (text.contains(c + " ") || text.contains(c + "\n")) ++failedCores;
+            if (failedCores == cores.size()) {
+                modelError = QString("DSSAT failed in all %1 GLUE workers.").arg(cores.size());
+                // Show DSSAT's own message from the first worker's ERROR.OUT
+                QFile eo(work.filePath(cores.first() + "/ERROR.OUT"));
+                if (eo.open(QIODevice::ReadOnly | QIODevice::Text)) {
+                    QStringList msg;
+                    for (const QString &l : QString::fromLatin1(eo.readAll()).split('\n'))
+                        if (l.contains("Error", Qt::CaseInsensitive) || l.trimmed().startsWith("File:"))
+                            msg << l.trimmed();
+                    if (!msg.isEmpty()) modelError += "\n" + msg.join("\n");
+                }
+            }
+        }
+    }
+
+    bool success = (exitCode == 0) && !culLine.isEmpty() && modelError.isEmpty();
     entry.status        = success ? GlueQueueStatus::Done : GlueQueueStatus::Failed;
-    entry.resultCulLine = culLine;
+    entry.resultCulLine = success ? culLine : QString();
     if (!success) {
-        entry.errorMsg = QString("Exit code %1").arg(exitCode);
+        entry.errorMsg = !modelError.isEmpty() ? modelError : QString("Exit code %1").arg(exitCode);
         if (!m_stderrBuf.isEmpty())
             entry.errorMsg += "\n\n" + m_stderrBuf.trimmed();
     }

@@ -236,10 +236,23 @@ bool CulTableModel::setData(const QModelIndex &index, const QVariant &value, int
 
     int col = index.column();
     switch (col) {
-    case COL_VARNUM: row.varNum = value.toString().left(6); break;
-    case COL_VRNAME: row.vrName = value.toString().left(13); break;
+    case COL_VARNUM: {
+        // A6 cultivar ID: exactly 6 chars, no spaces, not used by another row
+        const QString id = value.toString().trimmed().toUpper();
+        if (id.size() != 6 || id.contains(' ')) return false;
+        for (int i = 0; i < m_rows.size(); ++i)
+            if (i != index.row() && m_rows[i].varNum.compare(id, Qt::CaseInsensitive) == 0) return false;
+        row.varNum = id;
+        break;
+    }
+    case COL_VRNAME: row.vrName = value.toString().trimmed().left(16); break;   // A16
     case COL_EXPNO:  row.expNo  = value.toString().left(7).leftJustified(7, ' '); break;
-    case COL_ECONUM: row.ecoNum = value.toString().left(6); break;
+    case COL_ECONUM: {
+        const QString eco = value.toString().trimmed().toUpper();   // A6
+        if (eco.isEmpty() || eco.size() > 6 || eco.contains(' ')) return false;
+        row.ecoNum = eco;
+        break;
+    }
     default: {
         int p = col - COL_PARAM0;
         if (p >= 0 && p < m_paramNames.size()) {
@@ -325,28 +338,14 @@ void CulTableModel::addRowWithFullData(const QString &vrName, const QString &exp
 
 QString CulTableModel::generateUniqueVarNum() const
 {
-    // Find the most recent crop code (first 2 chars) and highest number for that code
-    QString cropCode = "NEW";  // Default fallback
-    int maxNum = 0;
-    
+    // Same prefix as the last regular cultivar, next free number, always 6 chars
+    QStringList ids;
+    QString last;
     for (const auto &row : m_rows) {
-        if (row.varNum.length() >= 6) {
-            QString code = row.varNum.left(2);
-            bool ok;
-            int num = row.varNum.right(4).toInt(&ok);
-            if (ok) {
-                // Use the last non-MINMAX code we find, and track the highest number
-                if (!row.isMinMax && code != "99") {
-                    cropCode = code;
-                    if (num > maxNum)
-                        maxNum = num;
-                }
-            }
-        }
+        ids << row.varNum;
+        if (!row.isMinMax) last = row.varNum;
     }
-    
-    // Format as [CROP_CODE] + 4-digit zero-padded number
-    return QString("%1%2").arg(cropCode).arg(maxNum + 1, 4, 10, QChar('0'));
+    return CulParser::nextFreeId(last.isEmpty() ? QString("XX0000") : last, ids);
 }
 
 void CulTableModel::duplicateRow(int row)

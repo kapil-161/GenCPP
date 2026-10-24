@@ -132,6 +132,7 @@ QVector<CulRow> CulParser::parse(const QString &filePath, QStringList &headerLin
     // not valid fixed-width data rows are dropped.
     bool inDataSection = false;
     QStringList pending;
+    QVector<QVector<int>> tokenEnds;   // per row: end of each value, relative to col 36
 
     while (!in.atEnd()) {
         QString line = in.readLine();
@@ -170,17 +171,20 @@ QVector<CulRow> CulParser::parse(const QString &filePath, QStringList &headerLin
         if (row.ecoNum.isEmpty()) continue;  // Invalid row if no ECO#
         inDataSection = true;
 
-        // Parameters start at position 36 onwards
-        QString paramStr = line.mid(36);
-        QStringList tokens = paramStr.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
-
-        row.fWidth = tokens.size() > 0 ? qMax(6, (int)std::round(paramStr.length() / (double)tokens.size())) : 6;
-
-        // Parse all parameter tokens dynamically without hard limit
-        for (int i = 0; i < tokens.size(); ++i) {
-            row.params << std::optional<double>(tokens[i].toDouble());
-            row.paramStrs << tokens[i];
+        // Parameters start at position 36 onwards; remember where each value ends
+        static const QRegularExpression tokRe("\\S+");
+        QVector<int> ends;
+        for (auto it = tokRe.globalMatch(line, 36); it.hasNext(); ) {
+            const auto m = it.next();
+            row.params << std::optional<double>(m.captured().toDouble());
+            row.paramStrs << m.captured();
+            ends << int(m.capturedEnd()) - 36;
         }
+        tokenEnds << ends;
+        // VAR# longer than A6, VRNAME running past A16 into EXPNO, or EXPNO
+        // running into ECO# (positions 6 and 29 must be blank)
+        if (line[6] != ' ' || line[29] != ' ' || (line[22] != ' ' && line[23] != ' '))
+            row.misaligned = true;
 
         row.isMinMax = (row.varNum == "999991" || row.varNum == "999992");
         row.preComment = pending.join('\n');
@@ -191,6 +195,23 @@ QVector<CulRow> CulParser::parse(const QString &filePath, QStringList &headerLin
     // Comments after the last data row have no row to attach to — keep them as a footer
     if (footerLines)
         *footerLines = pending;
+
+    // Field width: the width most values have (DSSAT CUL fields are uniform,
+    // usually 6). Rows whose values don't end on the column edges — e.g. a value
+    // shifted by one, or a blank field that shifts the values after it — are flagged.
+    QMap<int, int> widthVotes;
+    for (const auto &e : tokenEnds)
+        for (int i = 0; i < e.size(); ++i)
+            ++widthVotes[i == 0 ? e[0] : e[i] - e[i - 1]];
+    int width = 6, best = -1;
+    for (auto it = widthVotes.begin(); it != widthVotes.end(); ++it)
+        if (it.value() > best) { best = it.value(); width = it.key(); }
+    if (width < 2) width = 6;
+    for (int r = 0; r < rows.size(); ++r) {
+        rows[r].fWidth = width;
+        for (int i = 0; i < tokenEnds[r].size(); ++i)
+            if (tokenEnds[r][i] != (i + 1) * width) { rows[r].misaligned = true; break; }
+    }
 
     return rows;
 }
@@ -208,10 +229,17 @@ QString CulParser::formatRow(const CulRow &row, const QVector<ParamFormat> &form
     line += row.expNo.trimmed().rightJustified(6, ' ', true) + ' ';
     line += row.ecoNum.leftJustified(6, ' ', true);  // strict A6 (positions 30-35)
 
-    int actualParams = std::max(numParams, static_cast<int>(row.params.size()));
+    // Only the values this row has: padding a short row with extra values would
+    // change what DSSAT reads. A value with no entry is written as missing (-99).
+    Q_UNUSED(numParams);
+    const int actualParams = static_cast<int>(row.params.size());
 
     for (int i = 0; i < actualParams; ++i) {
-        double v = (i < row.params.size() && row.params[i].has_value()) ? row.params[i].value() : 0.0;
+        if (!row.params[i].has_value()) {
+            line += QString("-99").rightJustified((i < formats.size() ? formats[i].width : 5) + 1, ' ');
+            continue;
+        }
+        double v = row.params[i].value();
         ParamFormat fmt = (i < formats.size()) ? formats[i] : ParamFormat();
         // If this cell has its own stored string, derive decimal precision from it
         // (e.g. GLUE-applied values like "39.80" should not be rounded to "40")

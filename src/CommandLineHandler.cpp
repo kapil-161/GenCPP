@@ -57,6 +57,8 @@ CommandLineArgs CommandLineHandler::parseArgs(const QStringList &args)
             r.runs = args[++i].toInt();
         } else if (a == "--mode" && i+1 < args.size()) {
             r.mode = args[++i].toLower();
+        } else if (a == "--model" && i+1 < args.size()) {
+            r.model = args[++i].toUpper();
         }
     }
     return r;
@@ -225,7 +227,7 @@ int CommandLineHandler::runTests()
                     if (r >= rows.size()) break;
                     QString why;
                     if (line[6] != ' ' || line[29] != ' ') why = "pos 6/29 not space";
-                    const int n = qMax(numParams, (int)rows[r].params.size());
+                    const int n = (int)rows[r].params.size();   // rows are written with their own values only
                     if (why.isEmpty() && line.size() != 36 + n * W)
                         why = QString("length %1, expected %2").arg(line.size()).arg(36 + n * W);
                     for (int i = 0; why.isEmpty() && i < n; ++i) {
@@ -413,6 +415,33 @@ int CommandLineHandler::runTests()
         f.trailingDot = false; f.decimals = 2; f.width = 14;
         check(CulParser::formatParam(5.7, f) == QString(" ") + QString("5.70").rightJustified(14),
               "wide (15-char) field stays 15 chars");
+
+        // A value with no entry is written as DSSAT's missing value, and a row
+        // gets only its own values (no padding to the header's column count)
+        CulRow r;
+        r.varNum = "IB0001"; r.vrName = "TEST"; r.expNo = "."; r.ecoNum = "DFAULT";
+        r.params = {1.5, std::nullopt};
+        QVector<ParamFormat> fm(3);
+        for (auto &x : fm) { x.width = 5; x.decimals = 1; }
+        check(CulParser::formatRow(r, fm, 3) ==
+              "IB0001 TEST                 . DFAULT   1.5   -99",
+              "missing value written as -99, no padding columns");
+    }
+
+    // ── 8a2. CulParser: rows not in fixed-width format are flagged ───────────
+    fprintf(stdout, "\n[ CulParser: misaligned rows flagged ]\n");
+    {
+        int flagged = 0;
+        for (const QString &fn : QDir(GENOTYPE).entryList({"*.CUL"}, QDir::Files)) {
+            QStringList hdr;
+            for (const CulRow &row : CulParser::parse(GENOTYPE + "/" + fn, hdr))
+                if (row.misaligned) {
+                    ++flagged;
+                    fprintf(stdout, "  note: %s %s is not fixed-width in the source file\n",
+                            qPrintable(fn), qPrintable(row.varNum));
+                }
+        }
+        check(true, qPrintable(QString("%1 misaligned CUL row(s) reported").arg(flagged)));
     }
 
     // ── 8b. CulParser: nextFreeId keeps 6-char IDs ───────────────────────────
@@ -474,7 +503,7 @@ int CommandLineHandler::runGlue(const CommandLineArgs &a)
 {
     if (a.cropCode.isEmpty() || a.cultivarId.isEmpty()) {
         fprintf(stderr, "Usage: GeneticsEditor.exe --glue --crop WH --cultivar IB0488 "
-                        "--name NEWTON [--runs 100] [--mode phenology|growth|both]\n");
+                        "--name NEWTON [--runs 100] [--mode phenology|growth|both] [--model WHAPS048]\n");
         return 1;
     }
 
@@ -491,11 +520,23 @@ int CommandLineHandler::runGlue(const CommandLineArgs &a)
     // ── 1. Resolve CropInfo ───────────────────────────────────────────────────
     QMap<QString, CropInfo> crops = DssatProParser::discoverCrops(Config::DSSATPRO_FILE);
     CropInfo cropInfo;
+    QStringList models;
     for (const CropInfo &c : crops) {
         if (c.cropCode.compare(a.cropCode, Qt::CaseInsensitive) != 0) continue;
+        models << c.module;
+        if (!a.model.isEmpty()) {
+            // --model picks one of the crop's models (e.g. WHAPS048 for NWheat)
+            if (c.module.compare(a.model, Qt::CaseInsensitive) == 0) cropInfo = c;
+            continue;
+        }
         // Prefer the DSSATPRO-designated primary model; fall back to any match
         if (cropInfo.cropCode.isEmpty() || c.isPrimary)
             cropInfo = c;
+    }
+    if (cropInfo.cropCode.isEmpty() && !a.model.isEmpty() && !models.isEmpty()) {
+        fprintf(stderr, "ERROR: model '%s' not available for crop '%s' (available: %s)\n",
+                qPrintable(a.model), qPrintable(a.cropCode), qPrintable(models.join(", ")));
+        return 1;
     }
     if (cropInfo.cropCode.isEmpty()) {
         fprintf(stderr, "ERROR: crop '%s' not found in DSSATPRO.v48\n",
@@ -621,5 +662,6 @@ void CommandLineHandler::printUsage()
         "              --name NEWTON\n"
         "              [--runs 100]\n"
         "              [--mode phenology|growth|both]\n"
+        "              [--model WHAPS048]   (default: DSSATPRO primary model)\n"
     );
 }

@@ -30,6 +30,7 @@ struct CulRow {
     bool isMinMax = false;                       // true if varNum == "999991" or "999992"
     int fWidth = 6;                              // Inferred fixed-width format (e.g. 6 or 15)
     int trailingBlanks = 0;                      // number of blank lines that followed this row in the source file
+    bool misaligned = false;                     // row in the file did not fit the fixed-width columns
     QString preComment;                          // inline history comment written before this row
 };
 

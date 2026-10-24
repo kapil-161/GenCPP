@@ -208,26 +208,38 @@ void GlueQueueManager::onGlueFinished(int exitCode)
     // (e.g. an invalid CUL entry): its posterior is then meaningless.
     QString modelError;
     {
-        QFile ef(GlueRunner::GLUE_WORK + "/ErrorFrame.txt");
+        // Each worker core_<id>/ writes Error_list_<id>.txt when DSSAT fails there;
+        // GLUE.r merges them into ErrorFrame.txt only in some runs. Use both.
         const QDir work(GlueRunner::GLUE_WORK);
         const QStringList cores = work.entryList({"core_*"}, QDir::Dirs | QDir::NoDotAndDotDot);
-        if (!cores.isEmpty() && QFileInfo(ef).lastModified() >= m_runStart.addSecs(-1)
-            && ef.open(QIODevice::ReadOnly | QIODevice::Text)) {
-            const QString text = QString::fromLatin1(ef.readAll());
-            int failedCores = 0;
-            for (const QString &c : cores)
-                if (text.contains(c + " ") || text.contains(c + "\n")) ++failedCores;
-            if (failedCores == cores.size()) {
-                modelError = QString("DSSAT failed in all %1 GLUE workers.").arg(cores.size());
-                // Show DSSAT's own message from the first worker's ERROR.OUT
-                QFile eo(work.filePath(cores.first() + "/ERROR.OUT"));
-                if (eo.open(QIODevice::ReadOnly | QIODevice::Text)) {
-                    QStringList msg;
-                    for (const QString &l : QString::fromLatin1(eo.readAll()).split('\n'))
-                        if (l.contains("Error", Qt::CaseInsensitive) || l.trimmed().startsWith("File:"))
-                            msg << l.trimmed();
-                    if (!msg.isEmpty()) modelError += "\n" + msg.join("\n");
-                }
+        QString frame;
+        QFile ef(work.filePath("ErrorFrame.txt"));
+        if (QFileInfo(ef).lastModified() >= m_runStart.addSecs(-1) && ef.open(QIODevice::ReadOnly | QIODevice::Text))
+            frame = QString::fromLatin1(ef.readAll());
+        int failedCores = 0;
+        for (const QString &c : cores) {
+            bool failed = frame.contains(c + " ") || frame.contains(c + "\n");
+            const QDir cd(work.filePath(c));
+            for (const QString &f : cd.entryList({"Error_list_*.txt"}, QDir::Files)) {
+                QFile lf(cd.filePath(f));
+                if (QFileInfo(lf).lastModified() >= m_runStart.addSecs(-1)
+                    && lf.open(QIODevice::ReadOnly | QIODevice::Text)
+                    && QString::fromLatin1(lf.readAll()).contains("An error occurred"))
+                    failed = true;
+            }
+            if (failed) ++failedCores;
+        }
+        if (!cores.isEmpty() && failedCores == cores.size()) {
+            modelError = QString("DSSAT failed in all %1 GLUE workers.").arg(cores.size());
+            // Show DSSAT's own message from the first worker's ERROR.OUT
+            QFile eo(work.filePath(cores.first() + "/ERROR.OUT"));
+            if (eo.open(QIODevice::ReadOnly | QIODevice::Text)) {
+                QStringList msg;
+                for (const QString &l : QString::fromLatin1(eo.readAll()).split('\n'))
+                    if ((l.contains("Error", Qt::CaseInsensitive) && !l.startsWith("*RUN-TIME"))
+                        || l.trimmed().startsWith("File:"))
+                        msg << l.trimmed();
+                if (!msg.isEmpty()) modelError += "\n" + msg.join("\n");
             }
         }
     }
@@ -238,7 +250,20 @@ void GlueQueueManager::onGlueFinished(int exitCode)
     if (!success) {
         entry.errorMsg = !modelError.isEmpty() ? modelError : QString("Exit code %1").arg(exitCode);
         if (!m_stderrBuf.isEmpty())
-            entry.errorMsg += "\n\n" + m_stderrBuf.trimmed();
+        {
+            // R/DSSAT repeat lines like "STOP 99" once per model run: collapse repeats
+            QStringList out;
+            QString prev;
+            int rep = 0;
+            auto flush = [&]() { if (rep > 1) out.last() += QString("  (x%1)").arg(rep); };
+            for (const QString &l : m_stderrBuf.trimmed().split('\n')) {
+                if (l == prev) { ++rep; continue; }
+                flush();
+                out << l; prev = l; rep = 1;
+            }
+            flush();
+            entry.errorMsg += "\n\n" + out.join('\n');
+        }
     }
 
     // Save snapshot of all GLWork files to BackUp/<cropCode>_<cultivarId>/

@@ -832,70 +832,81 @@ void MainWindow::buildSpeNavigator()
 void MainWindow::onCulAdd()
 {
     bool ok;
-    
-    // Ask for VRNAME
-    QString vrName = QInputDialog::getText(this, "New Cultivar",
-        "Enter cultivar name (VRNAME):", QLineEdit::Normal,
-        "NEW CULTIVAR", &ok);
-    if (!ok || vrName.isEmpty()) return;
-    
-    // Ask for EXPNO
-    QString expNo = QInputDialog::getText(this, "New Cultivar",
-        "Enter experiment number (EXPNO):", QLineEdit::Normal,
-        " ", &ok);
-    if (!ok) return;
-    
-    // Ask for ECO#
-    QString ecoNum = QInputDialog::getText(this, "New Cultivar",
-        "Enter ecotype code (ECO#):", QLineEdit::Normal,
-        "DFAULT", &ok);
-    if (!ok || ecoNum.isEmpty()) return;
-    
-    // Ask for each numeric parameter with skip button
+
+    // Ask for a text field until it fits its fixed width (or Cancel)
+    auto askField = [&](const QString &label, const QString &def, int maxLen,
+                        bool allowSpaces, bool allowEmpty, QString &out) {
+        for (;;) {
+            out = QInputDialog::getText(this, "New Cultivar",
+                QString("%1 (max %2 chars):").arg(label).arg(maxLen),
+                QLineEdit::Normal, def, &ok).trimmed();
+            if (!ok) return false;
+            if ((allowEmpty || !out.isEmpty()) && out.size() <= maxLen
+                && (allowSpaces || !out.contains(' ')))
+                return true;
+            QMessageBox::warning(this, "New Cultivar",
+                QString("%1 must be %2at most %3 characters%4.")
+                    .arg(label, allowEmpty ? "" : "non-empty and ")
+                    .arg(maxLen).arg(allowSpaces ? "" : " without spaces"));
+        }
+    };
+
+    QString vrName, expNo, ecoNum;
+    if (!askField("Cultivar name (VRNAME)", "NEW CULTIVAR", 16, true, false, vrName)) return;
+    if (!askField("Experiment numbers (EXPNO)", ".", 6, false, true, expNo)) return;
+    if (!askField("Ecotype code (ECO#)", "DFAULT", 6, false, false, ecoNum)) return;
+    if (expNo.isEmpty()) expNo = ".";
+
+    // Ask for each parameter. Values must be numbers that fit the column.
+    // Skip leaves one value missing, Skip rest all remaining ones; DSSAT's
+    // missing value -99 is written for them.
     int numParams = m_culModel->columnCount() - CulTableModel::COL_PARAM0;
     QVector<std::optional<double>> params(numParams);
-    
+    const QVector<ParamFormat> fmts = CulParser::inferFormats(m_culModel->rows(), numParams);
+
     for (int i = 0; i < numParams; ++i) {
+        const QString paramName = m_culModel->columnName(CulTableModel::COL_PARAM0 + i);
+        const int maxLen = i < fmts.size() ? fmts[i].width : 5;
+
         QDialog dialog(this);
         dialog.setWindowTitle("New Cultivar Parameters");
-        
         QVBoxLayout *layout = new QVBoxLayout(&dialog);
-        
-        QString paramName = m_culModel->columnName(CulTableModel::COL_PARAM0 + i);
-        QLabel *label = new QLabel("Enter " + paramName + ":");
-        layout->addWidget(label);
-        
+        layout->addWidget(new QLabel(QString("Enter %1 (number, max %2 chars):").arg(paramName).arg(maxLen)));
         QLineEdit *lineEdit = new QLineEdit();
-        lineEdit->setText("0");
-        lineEdit->selectAll();
         layout->addWidget(lineEdit);
-        
+        QLabel *errLabel = new QLabel;
+        errLabel->setStyleSheet("color: #c0392b;");
+        layout->addWidget(errLabel);
+
         QHBoxLayout *buttonLayout = new QHBoxLayout();
-        QPushButton *addBtn = new QPushButton("Add");
-        QPushButton *skipBtn = new QPushButton("Skip");
+        QPushButton *addBtn     = new QPushButton("Add");
+        QPushButton *skipBtn    = new QPushButton("Skip");
+        QPushButton *skipAllBtn = new QPushButton("Skip rest");
+        addBtn->setDefault(true);
         buttonLayout->addWidget(addBtn);
         buttonLayout->addWidget(skipBtn);
+        buttonLayout->addWidget(skipAllBtn);
         layout->addLayout(buttonLayout);
-        
-        bool accepted = false;
+
+        bool skipRest = false;
         connect(addBtn, &QPushButton::clicked, [&]() {
-            params[i] = lineEdit->text().toDouble();
-            accepted = true;
+            const QString t = lineEdit->text().trimmed();
+            bool num;
+            const double v = t.toDouble(&num);
+            if (!num || t.size() > maxLen) {
+                errLabel->setText(QString("Enter a number of at most %1 characters.").arg(maxLen));
+                return;
+            }
+            params[i] = v;
             dialog.accept();
         });
-        
-        connect(skipBtn, &QPushButton::clicked, [&]() {
-            // Leave remaining as nullopt (no value)
-            dialog.reject();
-        });
-        
-        int result = dialog.exec();
-        if (result == QDialog::Rejected) {
-            // Skip was clicked - remaining params stay as nullopt
-            break;
-        }
+        connect(skipBtn,    &QPushButton::clicked, [&]() { dialog.reject(); });
+        connect(skipAllBtn, &QPushButton::clicked, [&]() { skipRest = true; dialog.reject(); });
+
+        dialog.exec();   // rejected (Skip / Esc) leaves this value missing
+        if (skipRest) break;
     }
-    
+
     // Create row with all user-provided values
     int newRow = m_culModel->rowCount();
     m_culModel->addRowWithFullData(vrName, expNo, ecoNum, params);
@@ -943,7 +954,12 @@ void MainWindow::onCulSave()
 
     if (CulParser::write(m_currentCulPath, m_culModel->rows(), m_culHeaderLines, paramNames, m_culFooterLines)) {
         m_culDirty = false;
-        setStatus("CUL saved: " + m_currentCulPath);
+        const int oor = m_culModel->getViolations().size();
+        if (oor > 0)
+            setStatus(QString("CUL saved: %1 — %2 value(s) outside the MINIMA/MAXIMA range"
+                              " (highlighted; Refresh lists them)").arg(m_currentCulPath).arg(oor), true);
+        else
+            setStatus("CUL saved: " + m_currentCulPath);
     } else {
         setStatus("Failed to save: " + m_currentCulPath, true);
     }
@@ -1104,6 +1120,15 @@ void MainWindow::onCulRefresh()
             }
         }
     }
+
+    for (const auto &v : m_culModel->getViolations())
+        issues << "CUL " + v.toString();
+
+    for (const auto &cr : m_culModel->rows())
+        if (cr.misaligned)
+            issues << "CUL " + cr.varNum + ": row is not in DSSAT fixed-width format in the file"
+                      " (values off their columns, a blank field, or a field longer than its width)"
+                      " — check it; saving rewrites it in fixed-width format";
 
     for (const auto &er : m_ecoModel->rows())
         if (er.misaligned)
@@ -1328,6 +1353,7 @@ void MainWindow::onSpeSearch()
     if (!cur.isNull()) {
         m_speEdit->setTextCursor(cur);
         m_speEdit->ensureCursorVisible();
+        setStatus(QString("Found \"%1\" at line %2").arg(needle).arg(cur.blockNumber() + 1));
     } else {
         setStatus("Text not found: " + needle, true);
     }

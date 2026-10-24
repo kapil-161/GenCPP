@@ -81,6 +81,7 @@ QString CulTableModel::columnName(int col) const
 
 bool CulTableModel::isOutOfRange(int paramIdx, double value) const
 {
+    if (value == -99.0) return false;   // DSSAT missing value, not a range violation
     if (m_minParams.size() > paramIdx && m_maxParams.size() > paramIdx) {
         if (m_minParams[paramIdx].has_value() && m_maxParams[paramIdx].has_value()) {
             double lo = m_minParams[paramIdx].value();

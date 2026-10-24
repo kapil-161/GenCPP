@@ -14,6 +14,7 @@ struct CommandLineArgs {
     QString cultivarName;       // e.g. "NEWTON"
     int     runs     = 100;
     QString mode     = "both";  // phenology|growth|both
+    QString model;              // e.g. "WHAPS048"; empty = DSSATPRO primary model
 };
 
 class CommandLineHandler : public QObject

@@ -101,7 +101,7 @@ void GlueQueuePanel::refresh()
             case GlueQueueStatus::Pending: statusStr = "Pending";  break;
             case GlueQueueStatus::Running: statusStr = "Running…"; anyRunning = true; break;
             case GlueQueueStatus::Done:    statusStr = "✓ Done (double-click to view)"; break;
-            case GlueQueueStatus::Failed:  statusStr = "✗ Failed (double-click for log): " + e.errorMsg; break;
+            case GlueQueueStatus::Failed:  statusStr = "✗ Failed (double-click for log): " + e.errorMsg.section('\n', 0, 0); break;
         }
         auto *statusItem = new QTableWidgetItem(statusStr);
         if (e.status == GlueQueueStatus::Done)

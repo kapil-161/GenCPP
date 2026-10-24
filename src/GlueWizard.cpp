@@ -504,7 +504,13 @@ void GlueWizard::onRunGlue()
             this, [this](int code, QProcess::ExitStatus){ onGlueFinished(code); });
 
     QString rterm = GlueRunner::findRTerm();
-    m_glueProcess->start(rterm, {"--slave", "--file=" + GlueRunner::GLUE_DIR + "/GLUE.r"});
+#ifdef Q_OS_WIN
+    // RTerm.exe needs -f to run a script file (same as GlueQueueManager)
+    m_glueProcess->start(rterm, {"--slave", "-f", GlueRunner::GLUE_DIR + "/GLUE.r"});
+#else
+    // Rscript: --file= makes R 4.4+ on macOS exit with "file name is missing"
+    m_glueProcess->start(rterm, {"--slave", GlueRunner::GLUE_DIR + "/GLUE.r"});
+#endif
 
     // Reset progress tracking
     m_totalRuns = m_runsSpin->value();

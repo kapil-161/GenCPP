@@ -483,6 +483,11 @@ int CommandLineHandler::runGlue(const CommandLineArgs &a)
             qPrintable(a.cultivarName), a.runs, qPrintable(a.mode));
     fflush(stdout);
 
+    // GLUE_DIR / GLUE_WORK: same discovery the GUI does at startup
+    GlueRunner::resolvePaths(Config::DSSATPRO_FILE);
+    fprintf(stdout, "GLUE dir: %s  Work dir: %s\n",
+            qPrintable(GlueRunner::GLUE_DIR), qPrintable(GlueRunner::GLUE_WORK));
+
     // ── 1. Resolve CropInfo ───────────────────────────────────────────────────
     QMap<QString, CropInfo> crops = DssatProParser::discoverCrops(Config::DSSATPRO_FILE);
     CropInfo cropInfo;
@@ -569,7 +574,13 @@ int CommandLineHandler::runGlue(const CommandLineArgs &a)
     QProcess proc;
     proc.setWorkingDirectory(GlueRunner::GLUE_DIR);
     proc.setProgram(rterm);
-    proc.setArguments({"--slave", "--file=" + GlueRunner::GLUE_DIR + "/GLUE.r"});
+#ifdef Q_OS_WIN
+    // RTerm.exe needs -f to run a script file (same as GlueQueueManager)
+    proc.setArguments({"--slave", "-f", GlueRunner::GLUE_DIR + "/GLUE.r"});
+#else
+    // Rscript: --file= makes R 4.4+ on macOS exit with "file name is missing"
+    proc.setArguments({"--slave", GlueRunner::GLUE_DIR + "/GLUE.r"});
+#endif
     proc.setProcessChannelMode(QProcess::MergedChannels);
 
     proc.start();

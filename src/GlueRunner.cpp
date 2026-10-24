@@ -108,6 +108,91 @@ void GlueRunner::setGlueDir(const QString &dir)
     QSettings("DSSAT", "GeneticsEditor").setValue("GlueDir", dir);
 }
 
+// ── unsupportedReason ─────────────────────────────────────────────────────────
+QString GlueRunner::unsupportedReason(const CropInfo &cropInfo)
+{
+    QFile f(GLUE_DIR + "/GlueExcludedModels.csv");
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) return QString();
+    const QString model = (cropInfo.modelId.isEmpty() ? cropInfo.module : cropInfo.modelId)
+                              .left(5).toUpper();
+    for (const QString &line : QString::fromLatin1(f.readAll()).split('\n')) {
+        const QStringList c = line.trimmed().split(',');
+        if (c.size() < 2 || line.startsWith('*') || line.startsWith('@')) continue;
+        if (c[0].trimmed().toUpper() == model
+            && c[1].trimmed().compare(cropInfo.cropCode, Qt::CaseInsensitive) == 0)
+            return QString("GLUE does not support model %1 for crop %2%3 (listed in "
+                           "GlueExcludedModels.csv). Choose another model for this crop.")
+                .arg(cropInfo.modelId.isEmpty() ? cropInfo.module : cropInfo.modelId,
+                     cropInfo.cropCode,
+                     c.size() > 2 && !c[2].trimmed().isEmpty() ? " (" + c[2].trimmed() + ")" : QString());
+    }
+    return QString();
+}
+
+QString GlueRunner::dssatFailure(const QDateTime &since)
+{
+    QString modelError;
+    // Each worker core_<id>/ writes Error_list_<id>.txt when DSSAT fails there;
+    // GLUE.r merges them into ErrorFrame.txt only in some runs. Use both.
+    const QDir work(GlueRunner::GLUE_WORK);
+    const QStringList cores = work.entryList({"core_*"}, QDir::Dirs | QDir::NoDotAndDotDot);
+    QString frame;
+    QFile ef(work.filePath("ErrorFrame.txt"));
+    if (QFileInfo(ef).lastModified() >= since.addSecs(-1) && ef.open(QIODevice::ReadOnly | QIODevice::Text))
+        frame = QString::fromLatin1(ef.readAll());
+    int failedCores = 0;
+    for (const QString &c : cores) {
+        bool failed = frame.contains(c + " ") || frame.contains(c + "\n");
+        const QDir cd(work.filePath(c));
+        for (const QString &f : cd.entryList({"Error_list_*.txt"}, QDir::Files)) {
+            QFile lf(cd.filePath(f));
+            if (QFileInfo(lf).lastModified() >= since.addSecs(-1)
+                && lf.open(QIODevice::ReadOnly | QIODevice::Text)
+                && QString::fromLatin1(lf.readAll()).contains("An error occurred"))
+                failed = true;
+        }
+        if (failed) ++failedCores;
+    }
+    if (!cores.isEmpty() && failedCores == cores.size()) {
+        modelError = QString("DSSAT failed in all %1 GLUE workers.").arg(cores.size());
+        // Show DSSAT's own message from the first worker's ERROR.OUT
+        QFile eo(work.filePath(cores.first() + "/ERROR.OUT"));
+        if (eo.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            QStringList msg;
+            for (const QString &l : QString::fromLatin1(eo.readAll()).split('\n'))
+                if ((l.contains("Error", Qt::CaseInsensitive) && !l.startsWith("*RUN-TIME"))
+                    || l.trimmed().startsWith("File:"))
+                    msg << l.trimmed();
+            if (!msg.isEmpty()) modelError += "\n" + msg.join("\n");
+        }
+    }
+    return modelError;
+}
+
+QString GlueRunner::lastRunWarning()
+{
+    // GLUE.r reports these in GlueWarning.txt and still exits normally:
+    // unsupported model, failed likelihood/posterior ("NA values ..."), etc.
+    QFile f(GLUE_WORK + "/GlueWarning.txt");
+    if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QStringList msg;
+        for (const QString &line : QString::fromLatin1(f.readAll()).split('\n'))
+            if (line.contains("not supported", Qt::CaseInsensitive)
+                || line.contains("error occurred", Qt::CaseInsensitive)
+                || line.contains("failed", Qt::CaseInsensitive))
+                msg << line.trimmed();
+        if (!msg.isEmpty()) return msg.join('\n');
+    }
+    // A complete run ends with "The first/second round of GLUE is finished."
+    QFile ind(GLUE_WORK + "/ModelRunIndicator.txt");
+    if (ind.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        const QStringList lines = QString::fromLatin1(ind.readAll()).trimmed().split('\n');
+        if (!lines.isEmpty() && !lines.last().contains("GLUE is finished", Qt::CaseInsensitive))
+            return "GLUE stopped before finishing (last step: " + lines.last().trimmed() + ")";
+    }
+    return QString();
+}
+
 // ── findRTerm ─────────────────────────────────────────────────────────────────
 QString GlueRunner::findRTerm()
 {

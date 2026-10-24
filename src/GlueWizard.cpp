@@ -479,6 +479,12 @@ void GlueWizard::onBrowseBackup()
 // ── Slot: Run GLUE ────────────────────────────────────────────────────────────
 void GlueWizard::onRunGlue()
 {
+    const QString unsupported = GlueRunner::unsupportedReason(m_cropInfo);
+    if (!unsupported.isEmpty()) {
+        QMessageBox::warning(this, "GLUE", unsupported);
+        return;
+    }
+
     int glueFlag  = m_modeCombo->currentData().toInt();
     QString ecoCalib = m_ecoCheck->isChecked() ? "Y" : "N";
     int runs = m_runsSpin->value();

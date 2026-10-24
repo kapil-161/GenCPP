@@ -241,6 +241,17 @@ QString CulParser::formatRow(const CulRow &row, const QVector<ParamFormat> &form
         }
         double v = row.params[i].value();
         ParamFormat fmt = (i < formats.size()) ? formats[i] : ParamFormat();
+        // The value's own text (as read, typed or pasted) is written as is, right-aligned,
+        // when it still matches the value and fits the field: ".405" stays ".405".
+        if (i < row.paramStrs.size() && !row.paramStrs[i].trimmed().isEmpty()) {
+            const QString s = row.paramStrs[i].trimmed();
+            bool ok;
+            const double sv = s.toDouble(&ok);
+            if (ok && sv == v && s.size() <= fmt.width) {
+                line += " " + s.rightJustified(fmt.width, ' ');
+                continue;
+            }
+        }
         // If this cell has its own stored string, derive decimal precision from it
         // (e.g. GLUE-applied values like "39.80" should not be rounded to "40")
         if (i < row.paramStrs.size() && !row.paramStrs[i].isEmpty()) {

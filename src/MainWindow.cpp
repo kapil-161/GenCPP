@@ -353,6 +353,11 @@ void MainWindow::setupCulTab(QWidget *tab)
             QMessageBox::warning(this, "GLUE Queue", "Cannot run GLUE on MINIMA/MAXIMA rows.");
             return;
         }
+        const QString unsupported = GlueRunner::unsupportedReason(m_crops[m_currentCropCode]);
+        if (!unsupported.isEmpty()) {
+            QMessageBox::warning(this, "GLUE Queue", unsupported);
+            return;
+        }
         GlueQueueDialog dlg(m_crops[m_currentCropCode], varNum, vrName, this);
         if (dlg.exec() == QDialog::Accepted) {
             m_glueQueue->addEntry(dlg.result());
@@ -431,14 +436,15 @@ void MainWindow::setupCulTab(QWidget *tab)
         }
 
         // Parse and apply params — fixed-width: VARNUM(6) SP VRNAME(16) EXPNO(7) ECO(6) SP params
-        QString paramStr = culLine.mid(37).trimmed();
+        // Params start at position 36 (a value may fill its whole field)
+        QString paramStr = culLine.mid(36).trimmed();
         QStringList vals = paramStr.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
         int nParams = m_culModel->columnCount() - CulTableModel::COL_PARAM0;
         for (int i = 0; i < qMin(vals.size(), nParams); ++i) {
             bool ok = false;
-            double v = vals[i].toDouble(&ok);
-            if (ok)
-                m_culModel->setData(m_culModel->index(culRow, CulTableModel::COL_PARAM0 + i), v);
+            vals[i].toDouble(&ok);
+            if (ok)   // pass GLUE's text, so its precision ("48.00") is kept on save
+                m_culModel->setData(m_culModel->index(culRow, CulTableModel::COL_PARAM0 + i), vals[i]);
         }
 
         // Auto-save directly — no .bak file, inline comment already written above

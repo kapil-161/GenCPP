@@ -2,6 +2,7 @@
 #define GLUERUNNER_H
 
 #include <QString>
+#include <QDateTime>
 #include <QStringList>
 #include <QMap>
 #include <QList>
@@ -39,6 +40,20 @@ public:
 
     // Find RTerm.exe / Rscript on the system
     static QString findRTerm();
+
+    // Why GLUE cannot calibrate this crop/model (empty if it can). GLUE.r lists
+    // unsupported pairs in GlueExcludedModels.csv (e.g. PRFRM forage models) and
+    // then quits without an error, so check before starting a run.
+    static QString unsupportedReason(const CropInfo &cropInfo);
+
+    // Non-empty if DSSAT failed in every GLUE worker (core_*) since `since`:
+    // GLUE.r still exits normally then, with a meaningless result.
+    static QString dssatFailure(const QDateTime &since);
+
+    // Why the last GLUE.r run did not complete (it exits normally anyway): an
+    // error note in GlueWarning.txt, or ModelRunIndicator.txt not reaching
+    // "GLUE is finished". Empty if the run completed.
+    static QString lastRunWarning();
 
     // Scan experiment files for treatments matching the given cultivar.
     // includeTreatmentNames=true reads TNAME column (needed for GUI display).

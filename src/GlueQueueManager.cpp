@@ -206,43 +206,11 @@ void GlueQueueManager::onGlueFinished(int exitCode)
 
     // GLUE.r finishes "successfully" even when DSSAT failed in every worker
     // (e.g. an invalid CUL entry): its posterior is then meaningless.
-    QString modelError;
-    {
-        // Each worker core_<id>/ writes Error_list_<id>.txt when DSSAT fails there;
-        // GLUE.r merges them into ErrorFrame.txt only in some runs. Use both.
-        const QDir work(GlueRunner::GLUE_WORK);
-        const QStringList cores = work.entryList({"core_*"}, QDir::Dirs | QDir::NoDotAndDotDot);
-        QString frame;
-        QFile ef(work.filePath("ErrorFrame.txt"));
-        if (QFileInfo(ef).lastModified() >= m_runStart.addSecs(-1) && ef.open(QIODevice::ReadOnly | QIODevice::Text))
-            frame = QString::fromLatin1(ef.readAll());
-        int failedCores = 0;
-        for (const QString &c : cores) {
-            bool failed = frame.contains(c + " ") || frame.contains(c + "\n");
-            const QDir cd(work.filePath(c));
-            for (const QString &f : cd.entryList({"Error_list_*.txt"}, QDir::Files)) {
-                QFile lf(cd.filePath(f));
-                if (QFileInfo(lf).lastModified() >= m_runStart.addSecs(-1)
-                    && lf.open(QIODevice::ReadOnly | QIODevice::Text)
-                    && QString::fromLatin1(lf.readAll()).contains("An error occurred"))
-                    failed = true;
-            }
-            if (failed) ++failedCores;
-        }
-        if (!cores.isEmpty() && failedCores == cores.size()) {
-            modelError = QString("DSSAT failed in all %1 GLUE workers.").arg(cores.size());
-            // Show DSSAT's own message from the first worker's ERROR.OUT
-            QFile eo(work.filePath(cores.first() + "/ERROR.OUT"));
-            if (eo.open(QIODevice::ReadOnly | QIODevice::Text)) {
-                QStringList msg;
-                for (const QString &l : QString::fromLatin1(eo.readAll()).split('\n'))
-                    if ((l.contains("Error", Qt::CaseInsensitive) && !l.startsWith("*RUN-TIME"))
-                        || l.trimmed().startsWith("File:"))
-                        msg << l.trimmed();
-                if (!msg.isEmpty()) modelError += "\n" + msg.join("\n");
-            }
-        }
-    }
+    // GLUE.r finishes "successfully" even when DSSAT failed in every worker
+    // (e.g. an invalid CUL entry): its posterior is then meaningless.
+    QString modelError = GlueRunner::dssatFailure(m_runStart);
+    if (modelError.isEmpty())
+        modelError = GlueRunner::lastRunWarning();   // GLUE.r stopped early (unsupported model, NA likelihoods, ...)
 
     bool success = (exitCode == 0) && !culLine.isEmpty() && modelError.isEmpty();
     entry.status        = success ? GlueQueueStatus::Done : GlueQueueStatus::Failed;

@@ -7,6 +7,7 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QDateTime>
 #include <QFile>
 #include <QFileInfo>
 #include <QTemporaryDir>
@@ -543,6 +544,13 @@ int CommandLineHandler::runGlue(const CommandLineArgs &a)
                 qPrintable(a.cropCode));
         return 1;
     }
+    {
+        const QString unsupported = GlueRunner::unsupportedReason(cropInfo);
+        if (!unsupported.isEmpty()) {
+            fprintf(stderr, "ERROR: %s\n", qPrintable(unsupported));
+            return 1;
+        }
+    }
     fprintf(stdout, "Crop: %s  Module: %s  ExpDir: %s\n",
             qPrintable(cropInfo.cropCode), qPrintable(cropInfo.module),
             qPrintable(cropInfo.expDir));
@@ -612,6 +620,7 @@ int CommandLineHandler::runGlue(const CommandLineArgs &a)
     fprintf(stdout, "--- GLUE output ---\n");
     fflush(stdout);
 
+    const QDateTime runStart = QDateTime::currentDateTime();
     QProcess proc;
     proc.setWorkingDirectory(GlueRunner::GLUE_DIR);
     proc.setProgram(rterm);
@@ -649,6 +658,13 @@ int CommandLineHandler::runGlue(const CommandLineArgs &a)
     int code = proc.exitCode();
     fprintf(stdout, "\n--- GLUE finished (exit code %d) ---\n", code);
     fflush(stdout);
+    // GLUE.r exits 0 even when it quit early or DSSAT failed in every worker
+    QString failure = GlueRunner::dssatFailure(runStart);
+    if (failure.isEmpty()) failure = GlueRunner::lastRunWarning();
+    if (!failure.isEmpty()) {
+        fprintf(stderr, "ERROR: %s\n", qPrintable(failure));
+        return code ? code : 2;
+    }
     return code;
 }
 

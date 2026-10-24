@@ -155,6 +155,11 @@ QMap<QString, CropInfo> DssatProParser::discoverCrops(const QString &dssatProPat
         info.isPrimary = !primaryMod.isEmpty() && base.startsWith(cropCode, Qt::CaseInsensitive)
                          && base.contains(primaryMod.mid(2, 3), Qt::CaseInsensitive);
 
+        // Some SIMULATION.CDE copies list crop-specific names (e.g. SBGRO) that GLUE
+        // rejects; DSSATPRO's module (e.g. CRGRO048) is the valid ModelID.
+        if (info.isPrimary && primaryMod.length() >= 5)
+            info.modelId = primaryMod;
+
         result[base] = info;  // key = "MZCER048" (unique per model/crop pair)
     }
     simFile.close();

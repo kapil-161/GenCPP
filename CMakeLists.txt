@@ -1,4 +1,12 @@
 cmake_minimum_required(VERSION 3.16)
+
+# On macOS, prefer Xcode's SDK: the Command Line Tools SDK can be newer than the
+# linker understands (e.g. CLT 27.0 .tbd files fail with "unknown architecture").
+set(_XCODE_SDK "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk")
+if(APPLE AND NOT CMAKE_OSX_SYSROOT AND EXISTS "${_XCODE_SDK}")
+    set(CMAKE_OSX_SYSROOT "${_XCODE_SDK}" CACHE PATH "macOS SDK")
+endif()
+
 project(GeneticsEditor VERSION 1.0.0 LANGUAGES CXX)
 
 # ---------------------------------------------------------------------------
@@ -147,11 +155,19 @@ elseif(APPLE)
         ${COCOA_FRAMEWORK} ${OPENGL_FRAMEWORK}
         ${COREGRAPHICS_FRAMEWORK} ${FOUNDATION_FRAMEWORK}
     )
-    # AGL was removed from the macOS 26+ SDK; add the 15.4 SDK framework path so the linker
-    # can still resolve the AGL stub injected by Qt's OpenGL modules.
-    if(EXISTS "/Library/Developer/CommandLineTools/SDKs/MacOSX15.4.sdk/System/Library/Frameworks/AGL.framework")
-        target_link_options(GeneticsEditor PRIVATE
-            "-F/Library/Developer/CommandLineTools/SDKs/MacOSX15.4.sdk/System/Library/Frameworks")
+    # AGL was removed from the macOS 26+ SDK, but Qt's OpenGL modules still link it.
+    # If the SDK lacks it, generate an empty AGL stub in the build dir for the linker.
+    if(NOT EXISTS "${CMAKE_OSX_SYSROOT}/System/Library/Frameworks/AGL.framework")
+        set(AGL_STUB_DIR "${CMAKE_BINARY_DIR}/agl_stub")
+        file(WRITE "${AGL_STUB_DIR}/AGL.framework/AGL.tbd"
+"--- !tapi-tbd
+tbd-version: 4
+targets: [ arm64-macos, x86_64-macos ]
+install-name: '/System/Library/Frameworks/AGL.framework/Versions/A/AGL'
+current-version: 1
+...
+")
+        target_link_options(GeneticsEditor PRIVATE "-F${AGL_STUB_DIR}")
     endif()
 else()
     qt_import_plugins(GeneticsEditor

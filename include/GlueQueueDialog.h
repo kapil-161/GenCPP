@@ -40,6 +40,7 @@ private:
     QTreeWidget  *m_tree;
     QLabel       *m_statusLabel;
     QSpinBox     *m_runsSpin;
+    QSpinBox     *m_coresSpin;
     QComboBox    *m_modeCombo;
     QCheckBox    *m_ecoCheck;
     QPushButton  *m_addBtn;

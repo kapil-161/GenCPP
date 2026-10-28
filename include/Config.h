@@ -38,6 +38,15 @@ namespace Config {
     const QColor WARNING_COLOR   = QColor("#FF9800");
     const QColor INFO_COLOR      = QColor("#2196F3");
     const QColor MINMAX_COLOR    = QColor("#FFF9C4");   // yellow – MINIMA/MAXIMA rows
+
+    // Primary action button (Run GLUE, Add to Queue, Apply). Full state set so
+    // hover/pressed/disabled don't fall back to the global or native style.
+    const QString ACCENT_BUTTON_STYLE =
+        "QPushButton { font-weight: bold; background-color: #2196F3; color: white;"
+        "  border: none; border-radius: 4px; padding: 6px 12px; }"
+        "QPushButton:hover { background-color: #42A5F5; }"
+        "QPushButton:pressed { background-color: #1976D2; }"
+        "QPushButton:disabled { background-color: #C9D6DF; color: #6c757d; }";
     const QColor OOR_COLOR       = QColor("#FFCDD2");   // red    – out-of-range values
     const QColor ECO_REF_COLOR   = QColor("#E8F5E9");   // green  – eco reference columns
 

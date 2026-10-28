@@ -13,6 +13,7 @@ struct CommandLineArgs {
     QString cultivarId;         // e.g. "IB0488"
     QString cultivarName;       // e.g. "NEWTON"
     int     runs     = 100;
+    int     cores    = 0;       // --cores; 0 = keep SimulationControl.csv value
     QString mode     = "both";  // phenology|growth|both
     QString model;              // e.g. "WHAPS048"; empty = DSSATPRO primary model
 };

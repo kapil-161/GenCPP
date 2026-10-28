@@ -7,6 +7,7 @@
 #include <QRegularExpression>
 #include <QSettings>
 #include <QStandardPaths>
+#include <QThread>
 
 QString GlueRunner::GLUE_DIR;
 QString GlueRunner::GLUE_WORK;
@@ -370,7 +371,8 @@ QString GlueRunner::writeBatchFile(const CropInfo &cropInfo,
 bool GlueRunner::updateSimControl(const CropInfo &cropInfo,
                                   const QString  &cultivarId,
                                   int runs, int glueFlag,
-                                  const QString  &ecoCalib)
+                                  const QString  &ecoCalib,
+                                  int cores)
 {
     QString simCtrlPath = GLUE_DIR + "/SimulationControl.csv";
     QFile sc(simCtrlPath);
@@ -394,9 +396,38 @@ bool GlueRunner::updateSimControl(const CropInfo &cropInfo,
             line = QString("ModelID,%1").arg(cropInfo.modelId.isEmpty() ? cropInfo.module : cropInfo.modelId);
     }
 
+    if (cores > 0) {
+        bool found = false;
+        for (QString &line : lines) {
+            if (line.startsWith("Cores,")) {
+                line = QString("Cores,%1").arg(cores);
+                found = true;
+            }
+        }
+        if (!found) lines << QString("Cores,%1").arg(cores);
+    }
+
     QFile scOut(simCtrlPath);
     if (!scOut.open(QIODevice::WriteOnly | QIODevice::Text)) return false;
     QTextStream out(&scOut);
     for (const QString &l : lines) out << l << "\n";
     return true;
+}
+
+// ── Cores ─────────────────────────────────────────────────────────────────────
+int GlueRunner::maxCores()
+{
+    return qMax(1, QThread::idealThreadCount());
+}
+
+int GlueRunner::defaultCores()
+{
+    int saved = QSettings("DSSAT", "GeneticsEditor").value("GlueCores", 0).toInt();
+    if (saved > 0) return qMin(saved, maxCores());
+    return qMax(1, maxCores() - 1);
+}
+
+void GlueRunner::saveCores(int cores)
+{
+    QSettings("DSSAT", "GeneticsEditor").setValue("GlueCores", cores);
 }

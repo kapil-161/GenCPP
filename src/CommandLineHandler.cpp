@@ -56,6 +56,8 @@ CommandLineArgs CommandLineHandler::parseArgs(const QStringList &args)
             r.cultivarName = args[++i];
         } else if (a == "--runs" && i+1 < args.size()) {
             r.runs = args[++i].toInt();
+        } else if (a == "--cores" && i+1 < args.size()) {
+            r.cores = args[++i].toInt();
         } else if (a == "--mode" && i+1 < args.size()) {
             r.mode = args[++i].toLower();
         } else if (a == "--model" && i+1 < args.size()) {
@@ -504,7 +506,7 @@ int CommandLineHandler::runGlue(const CommandLineArgs &a)
 {
     if (a.cropCode.isEmpty() || a.cultivarId.isEmpty()) {
         fprintf(stderr, "Usage: GeneticsEditor.exe --glue --crop WH --cultivar IB0488 "
-                        "--name NEWTON [--runs 100] [--mode phenology|growth|both] [--model WHAPS048]\n");
+                        "--name NEWTON [--runs 100] [--cores 4] [--mode phenology|growth|both] [--model WHAPS048]\n");
         return 1;
     }
 
@@ -605,7 +607,8 @@ int CommandLineHandler::runGlue(const CommandLineArgs &a)
     if (a.mode == "phenology") glueFlag = 2;
     else if (a.mode == "growth") glueFlag = 3;
 
-    if (!GlueRunner::updateSimControl(cropInfo, a.cultivarId, a.runs, glueFlag, "N")) {
+    int cores = a.cores > 0 ? qMin(a.cores, GlueRunner::maxCores()) : 0;
+    if (!GlueRunner::updateSimControl(cropInfo, a.cultivarId, a.runs, glueFlag, "N", cores)) {
         fprintf(stderr, "ERROR: Cannot update %s/SimulationControl.csv\n",
                 qPrintable(GlueRunner::GLUE_DIR));
         return 1;
@@ -677,6 +680,7 @@ void CommandLineHandler::printUsage()
         "              --cultivar IB0488\n"
         "              --name NEWTON\n"
         "              [--runs 100]\n"
+        "              [--cores 4]\n"
         "              [--mode phenology|growth|both]\n"
         "              [--model WHAPS048]   (default: DSSATPRO primary model)\n"
     );

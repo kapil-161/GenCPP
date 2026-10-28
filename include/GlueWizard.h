@@ -74,6 +74,7 @@ private:
 
     // Page 3 — run
     QSpinBox     *m_runsSpin;
+    QSpinBox     *m_coresSpin;
     QComboBox    *m_modeCombo;
     QCheckBox    *m_ecoCheck;
     QPushButton  *m_runGlueBtn;

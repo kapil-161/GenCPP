@@ -70,10 +70,17 @@ public:
 
     // Update SimulationControl.csv with run parameters.
     // glueFlag: 1=both, 2=phenology only, 3=growth parameters
+    // cores: CPU cores for GLUE; 0 leaves the existing Cores value unchanged.
     static bool updateSimControl(const CropInfo &cropInfo,
                                  const QString  &cultivarId,
                                  int runs, int glueFlag,
-                                 const QString  &ecoCalib);
+                                 const QString  &ecoCalib,
+                                 int cores = 0);
+
+    // Cores available on this machine, and the default to offer (last used, else all but one).
+    static int maxCores();
+    static int defaultCores();
+    static void saveCores(int cores);
 };
 
 #endif // GLUERUNNER_H

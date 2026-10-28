@@ -17,6 +17,7 @@ struct GlueQueueEntry {
     CropInfo       cropInfo;
     TreatmentMap   selectedTreatments;
     int            runs      = 500;
+    int            cores     = 0;   // 0 = keep SimulationControl.csv value
     int            glueFlag  = 1;   // 1=both, 2=pheno, 3=growth
     QString        ecoCalib  = "N";
 

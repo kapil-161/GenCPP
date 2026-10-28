@@ -1,5 +1,6 @@
 #include "GlueWizard.h"
 #include "GlueRunner.h"
+#include "Config.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGridLayout>
@@ -96,9 +97,15 @@ void GlueWizard::setupTreatmentPage()
 
     connect(m_tree, &QTreeWidget::itemChanged, this, [this](QTreeWidgetItem *item) {
         QTreeWidgetItem *parent = item->parent();
-        if (!parent) return; // it's a top-level (experiment) item, ignore
         // Block signals to avoid recursion
         m_tree->blockSignals(true);
+        if (!parent) {
+            // Experiment item: apply its state to all treatments
+            for (int i = 0; i < item->childCount(); ++i)
+                item->child(i)->setCheckState(0, item->checkState(0));
+            m_tree->blockSignals(false);
+            return;
+        }
         bool anyChecked = false;
         for (int i = 0; i < parent->childCount(); ++i)
             if (parent->child(i)->checkState(0) == Qt::Checked) { anyChecked = true; break; }
@@ -179,11 +186,20 @@ void GlueWizard::setupRunPage()
     form->setRowWrapPolicy(QFormLayout::WrapAllRows);
 
     m_runsSpin = new QSpinBox;
-    m_runsSpin->setRange(100, 1000000);
+    m_runsSpin->setRange(10, 1000000);
+    m_runsSpin->setToolTip("Model runs per GLUE round. Small counts (under ~1000) are only for testing the setup.");
     m_runsSpin->setValue(100);
     m_runsSpin->setSingleStep(1000);
     m_runsSpin->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     form->addRow("Runs:", m_runsSpin);
+
+    m_coresSpin = new QSpinBox;
+    m_coresSpin->setRange(1, GlueRunner::maxCores());
+    m_coresSpin->setValue(GlueRunner::defaultCores());
+    m_coresSpin->setSuffix(QString(" of %1").arg(GlueRunner::maxCores()));
+    m_coresSpin->setToolTip("CPU cores GLUE runs in parallel. Leaving one free keeps the PC responsive.");
+    m_coresSpin->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    form->addRow("Cores:", m_coresSpin);
 
     m_modeCombo = new QComboBox;
     m_modeCombo->addItem("Both (Phenology + Growth)", 1);
@@ -205,7 +221,7 @@ void GlueWizard::setupRunPage()
     m_stopGlueBtn  = new QPushButton("Stop GLUE");
     m_startOverBtn = new QPushButton("Start Over");
     m_stopGlueBtn->setEnabled(false);
-    m_runGlueBtn->setStyleSheet("font-weight:bold; background:#2196F3; color:white;");
+    m_runGlueBtn->setStyleSheet(Config::ACCENT_BUTTON_STYLE);
 
     centerCol->addWidget(m_runGlueBtn);
     centerCol->addWidget(m_stopGlueBtn);
@@ -307,7 +323,7 @@ void GlueWizard::setupRunPage()
         vl->addWidget(hint);
         QHBoxLayout *hl = new QHBoxLayout;
         QPushButton *applyBtn = new QPushButton("Apply to CUL File");
-        applyBtn->setStyleSheet("font-weight:bold; background:#2196F3; color:white;");
+        applyBtn->setStyleSheet(Config::ACCENT_BUTTON_STYLE);
         QPushButton *cancelBtn = new QPushButton("Close");
         hl->addStretch();
         hl->addWidget(applyBtn);
@@ -488,8 +504,10 @@ void GlueWizard::onRunGlue()
     int glueFlag  = m_modeCombo->currentData().toInt();
     QString ecoCalib = m_ecoCheck->isChecked() ? "Y" : "N";
     int runs = m_runsSpin->value();
+    int cores = m_coresSpin->value();
+    GlueRunner::saveCores(cores);
 
-    if (!GlueRunner::updateSimControl(m_cropInfo, m_cultivarId, runs, glueFlag, ecoCalib)) {
+    if (!GlueRunner::updateSimControl(m_cropInfo, m_cultivarId, runs, glueFlag, ecoCalib, cores)) {
         QMessageBox::critical(this, "Error",
             "Cannot open/write SimulationControl.csv:\n" + GlueRunner::GLUE_DIR);
         return;

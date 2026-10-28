@@ -1,4 +1,5 @@
 #include "GlueQueueDialog.h"
+#include "Config.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QFormLayout>
@@ -54,10 +55,18 @@ GlueQueueDialog::GlueQueueDialog(const CropInfo &cropInfo,
     QFormLayout *form = new QFormLayout(paramBox);
 
     m_runsSpin = new QSpinBox;
-    m_runsSpin->setRange(100, 1000000);
+    m_runsSpin->setRange(10, 1000000);
+    m_runsSpin->setToolTip("Model runs per GLUE round. Small counts (under ~1000) are only for testing the setup.");
     m_runsSpin->setValue(500);
     m_runsSpin->setSingleStep(1000);
     form->addRow("Runs:", m_runsSpin);
+
+    m_coresSpin = new QSpinBox;
+    m_coresSpin->setRange(1, GlueRunner::maxCores());
+    m_coresSpin->setValue(GlueRunner::defaultCores());
+    m_coresSpin->setSuffix(QString(" of %1").arg(GlueRunner::maxCores()));
+    m_coresSpin->setToolTip("CPU cores GLUE runs in parallel. Leaving one free keeps the PC responsive.");
+    form->addRow("Cores:", m_coresSpin);
 
     m_modeCombo = new QComboBox;
     m_modeCombo->addItem("Both (Phenology + Growth)", 1);
@@ -74,7 +83,7 @@ GlueQueueDialog::GlueQueueDialog(const CropInfo &cropInfo,
     QHBoxLayout *btnRow = new QHBoxLayout;
     btnRow->addStretch();
     m_addBtn = new QPushButton("Add to Queue");
-    m_addBtn->setStyleSheet("font-weight:bold; background:#2196F3; color:white;");
+    m_addBtn->setStyleSheet(Config::ACCENT_BUTTON_STYLE);
     m_addBtn->setDefault(true);
     QPushButton *cancelBtn = new QPushButton("Cancel");
     btnRow->addWidget(m_addBtn);
@@ -88,8 +97,13 @@ GlueQueueDialog::GlueQueueDialog(const CropInfo &cropInfo,
 
     connect(m_tree, &QTreeWidget::itemChanged, this, [this](QTreeWidgetItem *item) {
         QTreeWidgetItem *par = item->parent();
-        if (!par) return;
         m_tree->blockSignals(true);
+        if (!par) {
+            for (int i = 0; i < item->childCount(); ++i)
+                item->child(i)->setCheckState(0, item->checkState(0));
+            m_tree->blockSignals(false);
+            return;
+        }
         bool any = false;
         for (int i = 0; i < par->childCount(); ++i)
             if (par->child(i)->checkState(0) == Qt::Checked) { any = true; break; }
@@ -187,6 +201,8 @@ void GlueQueueDialog::onAddToQueue()
     m_entry.cropInfo           = m_cropInfo;
     m_entry.selectedTreatments = selected;
     m_entry.runs               = m_runsSpin->value();
+    m_entry.cores              = m_coresSpin->value();
+    GlueRunner::saveCores(m_entry.cores);
     m_entry.glueFlag           = m_modeCombo->currentData().toInt();
     m_entry.ecoCalib           = m_ecoCheck->isChecked() ? "Y" : "N";
     m_entry.status             = GlueQueueStatus::Pending;

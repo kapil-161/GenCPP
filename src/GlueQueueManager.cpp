@@ -93,7 +93,8 @@ void GlueQueueManager::runNext()
 
     // Update SimulationControl.csv
     if (!GlueRunner::updateSimControl(entry.cropInfo, entry.cultivarId,
-                                      entry.runs, entry.glueFlag, entry.ecoCalib)) {
+                                      entry.runs, entry.glueFlag, entry.ecoCalib,
+                                      entry.cores)) {
         entry.status   = GlueQueueStatus::Failed;
         entry.errorMsg = "Failed to update SimulationControl.csv";
         emit queueChanged();

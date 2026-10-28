@@ -437,21 +437,34 @@ QMap<QString, QString> CulParser::calibrationTypes(const QStringList &headerLine
 {
     static const QRegularExpression calRe("^!\\s*[Cc]alibration\\b");
 
+    // Map tokens onto this file's own @VAR# columns — crops differ from the
+    // CROPGRO list — matching what updateCalibrationHeaderLine() writes.
+    QStringList paramNames = extractParamNames(headerLines);
+    if (paramNames.isEmpty()) paramNames = CUL_PARAM_NAMES;
+
+    QMap<QString, QString> types;
+    bool found = false;
     for (const QString &line : headerLines) {
         if (!calRe.match(line).hasMatch()) continue;
 
         // Split and skip the first token ("!Calibration")
-        QMap<QString, QString> types;
         QStringList tokens = line.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
-        for (int i = 1; i < tokens.size() && (i - 1) < CUL_PARAM_NAMES.size(); ++i)
-            types[CUL_PARAM_NAMES[i - 1]] = tokens[i].toUpper();
-        return types;
+        for (int i = 1; i < tokens.size() && (i - 1) < paramNames.size(); ++i)
+            types[paramNames[i - 1]] = tokens[i].toUpper();
+        found = true;
+        break;
     }
 
     // No "!Calibration" line in this file yet — seed sensible defaults for
     // the standard parameter set so the P/G/N badges show up without
     // requiring a manual per-column selection first.
-    return DEFAULT_CALIBRATION_TYPES;
+    if (!found) types = DEFAULT_CALIBRATION_TYPES;
+
+    // Any column still unassigned (short line, non-CROPGRO name) is saved as
+    // "N", so show it as "N" too rather than no badge at all.
+    for (const QString &name : paramNames)
+        if (!types.contains(name)) types[name] = "N";
+    return types;
 }
 
 QMap<QString, QString> CulParser::tooltipsFromHeader(const QStringList &headerLines)

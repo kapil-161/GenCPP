@@ -149,6 +149,7 @@ MainWindow::MainWindow(QWidget *parent)
         "  padding: 6px 14px; margin-right: 2px;"
         "  border-top-left-radius: 4px; border-top-right-radius: 4px; }"
         "QTabBar::tab:selected { background-color: #F0F5F9; font-weight: bold; }"
+        "QTabBar::tab:hover:!selected { background-color: #EEF3F7; }"
         "QComboBox, QLineEdit { background-color: white; border: 1px solid #C9D6DF;"
         "  border-radius: 3px; padding: 2px 5px; }"
         "QGroupBox { background-color: #F0F5F9; border: 1px solid #C9D6DF;"
@@ -162,12 +163,15 @@ MainWindow::MainWindow(QWidget *parent)
         "  border: 1px solid #C9D6DF; font-weight: bold; }"
         "QPushButton { background-color: #52A7E0; border: none; border-radius: 4px;"
         "  padding: 6px 12px; font-weight: bold; color: white; min-width: 60px; }"
-        "QPushButton:hover { background-color: #3D8BC7; }"
+        "QPushButton:hover { background-color: #6CB6E7; }"
+        "QPushButton:pressed { background-color: #3D8BC7; }"
         "QPushButton:disabled { background-color: #C9D6DF; color: #6c757d; }"
         "QPushButton#dangerBtn { background-color: #E53935; }"
-        "QPushButton#dangerBtn:hover { background-color: #C62828; }"
+        "QPushButton#dangerBtn:hover { background-color: #EF5350; }"
+        "QPushButton#dangerBtn:pressed { background-color: #C62828; }"
         "QPushButton#saveBtn { background-color: #43A047; }"
-        "QPushButton#saveBtn:hover { background-color: #2E7D32; }"
+        "QPushButton#saveBtn:hover { background-color: #5CB860; }"
+        "QPushButton#saveBtn:pressed { background-color: #2E7D32; }"
         "QTextEdit { background-color: white; border: 1px solid #C9D6DF; }"
         "QListWidget { background-color: white; border: 1px solid #C9D6DF; }"
         "QSplitter::handle { background-color: #C9D6DF; }"
@@ -339,7 +343,7 @@ void MainWindow::setupCulTab(QWidget *tab)
     m_culGlueQueueBtn = makeBtn("Run GLUE");
     QPushButton *addQueueBtn = m_culGlueQueueBtn;
     addQueueBtn->setToolTip("Select treatments and add this cultivar to the GLUE calibration queue");
-    addQueueBtn->setStyleSheet("font-weight:bold; background:#2196F3; color:white;");
+    addQueueBtn->setStyleSheet(Config::ACCENT_BUTTON_STYLE);
     connect(addQueueBtn, &QPushButton::clicked, this, [this]() {
         QModelIndex idx = m_culView->currentIndex();
         if (!idx.isValid()) {

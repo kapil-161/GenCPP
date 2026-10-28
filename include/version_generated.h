@@ -2,9 +2,9 @@
 #ifndef VERSION_GENERATED_H
 #define VERSION_GENERATED_H
 
-#define GIT_COMMIT_COUNT  "65"
-#define GIT_SHORT_HASH    "332c7a5"
-#define GEN2_VERSION      "1.0.65"
-#define GEN2_VERSION_FULL "1.0.65-332c7a5"
+#define GIT_COMMIT_COUNT  "72"
+#define GIT_SHORT_HASH    "32e83a7"
+#define GEN2_VERSION      "1.0.72"
+#define GEN2_VERSION_FULL "1.0.72-32e83a7"
 
 #endif // VERSION_GENERATED_H

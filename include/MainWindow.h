@@ -44,6 +44,7 @@ private slots:
     // Menu actions
     void onOpenDssatDir();
     void onOpenGlueDir();
+    void onOpenRDir();
     void onAbout();
 
     // Crop/file selection
@@ -94,6 +95,7 @@ private:
     void refreshEcoCrossRef();
     void buildSpeNavigator();
     void setStatus(const QString &msg, bool error = false);
+    void selectNewCulRow(int sourceRow);
     void updateCalibrationHeaderLine();
 
     // UI – top bar

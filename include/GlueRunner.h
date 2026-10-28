@@ -38,8 +38,16 @@ public:
     // Persists to QSettings.
     static void setGlueDir(const QString &dir);
 
-    // Find RTerm.exe / Rscript on the system
+    // Find RTerm.exe / Rscript: the user-selected R directory if set, else auto-detect
     static QString findRTerm();
+
+    // R executable inside an R install folder (R home, its bin, or bin/x64);
+    // empty if none. Lets the user pick any of those levels.
+    static QString rExecutableIn(const QString &dir);
+
+    // User-selected R directory (QSettings "RDir"); empty = auto-detect.
+    static QString rDir();
+    static void setRDir(const QString &dir);
 
     // Why GLUE cannot calibrate this crop/model (empty if it can). GLUE.r lists
     // unsupported pairs in GlueExcludedModels.csv (e.g. PRFRM forage models) and

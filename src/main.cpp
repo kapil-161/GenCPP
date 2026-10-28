@@ -1,4 +1,5 @@
 #include <QStyleFactory>
+#include <QStyle>
 #include <QIcon>
 #include <QDir>
 #include <QFile>
@@ -41,6 +42,9 @@ int main(int argc, char *argv[])
 
     // Fusion style for a consistent cross-platform look
     app.setStyle(QStyleFactory::create("Fusion"));
+    // Fusion follows Windows dark mode; the UI is styled light, so pin the
+    // light palette or unstyled parts (tooltips, menus) render dark.
+    app.setPalette(app.style()->standardPalette());
 
     // Application icon
     QString iconPath = QDir::currentPath() + "/resources/final.ico";

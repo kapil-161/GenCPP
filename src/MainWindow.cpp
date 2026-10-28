@@ -80,6 +80,14 @@ public:
         invalidateFilter();
     }
 
+    // Keep a row the user just added/duplicated visible while the
+    // "used in experiments" filter is on (its new VAR# isn't in any experiment).
+    void keepVisible(const QString &varNum) {
+        if (!m_filterActive) return;
+        m_usedVarNums.insert(varNum.trimmed());
+        invalidateFilter();
+    }
+
 protected:
     bool filterAcceptsRow(int sourceRow, const QModelIndex &sourceParent) const override {
         if (m_filterActive) {
@@ -176,6 +184,8 @@ MainWindow::MainWindow(QWidget *parent)
         "QListWidget { background-color: white; border: 1px solid #C9D6DF; }"
         "QSplitter::handle { background-color: #C9D6DF; }"
         "QStatusBar { background-color: #E4E8ED; }"
+        "QToolTip { background-color: #FFFFFF; color: #1F2933; border: 1px solid #C9D6DF;"
+        "  padding: 4px 6px; }"
     );
 
     setupUI();
@@ -296,6 +306,7 @@ void MainWindow::setupMenuBar()
     QMenu *fileMenu = menuBar()->addMenu("&File");
     fileMenu->addAction("Open DSSAT directory…", this, &MainWindow::onOpenDssatDir);
     fileMenu->addAction("Set GLUE directory…",   this, &MainWindow::onOpenGlueDir);
+    fileMenu->addAction("Set R directory…",      this, &MainWindow::onOpenRDir);
     fileMenu->addSeparator();
     fileMenu->addAction("E&xit", qApp, &QApplication::quit);
 
@@ -921,12 +932,20 @@ void MainWindow::onCulAdd()
     int newRow = m_culModel->rowCount();
     m_culModel->addRowWithFullData(vrName, expNo, ecoNum, params);
     m_culDirty = true;
-    
+
     // Focus on the new row
-    QModelIndex newIdx = m_culProxy->mapFromSource(
-        m_culModel->index(newRow, CulTableModel::COL_VARNUM));
-    if (newIdx.isValid())
+    selectNewCulRow(newRow);
+}
+
+void MainWindow::selectNewCulRow(int sourceRow)
+{
+    QModelIndex srcIdx = m_culModel->index(sourceRow, CulTableModel::COL_VARNUM);
+    m_culProxy->keepVisible(srcIdx.data().toString());
+    QModelIndex newIdx = m_culProxy->mapFromSource(srcIdx);
+    if (newIdx.isValid()) {
         m_culView->setCurrentIndex(newIdx);
+        m_culView->scrollTo(newIdx);
+    }
 }
 
 void MainWindow::onCulDelete()
@@ -944,8 +963,18 @@ void MainWindow::onCulDelete()
 void MainWindow::onCulDuplicate()
 {
     QModelIndex idx = m_culProxy->mapToSource(m_culView->currentIndex());
-    if (idx.isValid())
-        m_culModel->duplicateRow(idx.row());
+    if (!idx.isValid()) {
+        setStatus("Select a cultivar row to duplicate.", true);
+        return;
+    }
+    const QString srcVar = m_culModel->index(idx.row(), CulTableModel::COL_VARNUM).data().toString();
+    int newRow = m_culModel->rowCount();
+    m_culModel->duplicateRow(idx.row());
+    if (m_culModel->rowCount() == newRow) return;
+    selectNewCulRow(newRow);
+    setStatus(QString("Duplicated %1 as %2.")
+                  .arg(srcVar.trimmed(),
+                       m_culModel->index(newRow, CulTableModel::COL_VARNUM).data().toString().trimmed()));
 }
 
 void MainWindow::onCulSave()
@@ -1304,7 +1333,21 @@ void MainWindow::onEcoDelete()
 void MainWindow::onEcoDuplicate()
 {
     QModelIndex idx = m_ecoProxy->mapToSource(m_ecoView->currentIndex());
-    if (idx.isValid()) m_ecoModel->duplicateRow(idx.row());
+    if (!idx.isValid()) {
+        setStatus("Select an ecotype row to duplicate.", true);
+        return;
+    }
+    int newRow = m_ecoModel->rowCount();
+    m_ecoModel->duplicateRow(idx.row());
+    if (m_ecoModel->rowCount() == newRow) return;
+    QModelIndex newIdx = m_ecoProxy->mapFromSource(m_ecoModel->index(newRow, 0));
+    if (newIdx.isValid()) {
+        m_ecoView->setCurrentIndex(newIdx);
+        m_ecoView->scrollTo(newIdx);
+    }
+    setStatus(QString("Duplicated %1 as %2.")
+                  .arg(m_ecoModel->index(idx.row(), 0).data().toString().trimmed(),
+                       m_ecoModel->index(newRow, 0).data().toString().trimmed()));
 }
 
 void MainWindow::onEcoSave()
@@ -1930,6 +1973,51 @@ void MainWindow::onOpenGlueDir()
     }
     GlueRunner::setGlueDir(dir);
     setStatus("GLUE directory set: " + dir);
+}
+
+void MainWindow::onOpenRDir()
+{
+    const QString current = GlueRunner::rDir();
+    const QString inUse   = GlueRunner::findRTerm();
+
+    // Offer a way back to auto-detect once a directory has been chosen
+    if (!current.isEmpty()) {
+        QMessageBox box(QMessageBox::Question, "R directory",
+            QString("R used for GLUE:\n%1\n\nSelected directory:\n%2")
+                .arg(QDir::toNativeSeparators(inUse), QDir::toNativeSeparators(current)),
+            QMessageBox::NoButton, this);
+        QPushButton *chooseBtn = box.addButton("Choose another…", QMessageBox::AcceptRole);
+        QPushButton *autoBtn   = box.addButton("Use auto-detect", QMessageBox::DestructiveRole);
+        box.addButton(QMessageBox::Cancel);
+        box.exec();
+        if (box.clickedButton() == autoBtn) {
+            GlueRunner::setRDir(QString());
+            setStatus("R directory: auto-detect (" +
+                      QDir::toNativeSeparators(GlueRunner::findRTerm()) + ")");
+            return;
+        }
+        if (box.clickedButton() != chooseBtn) return;
+    }
+
+#ifdef Q_OS_WIN
+    const QString startDir = current.isEmpty() ? QString("C:/Program Files/R") : current;
+    const QString hint = "the R install folder, e.g. C:\\Program Files\\R\\R-4.6.1";
+#else
+    const QString startDir = current.isEmpty() ? QString("/Library/Frameworks/R.framework") : current;
+    const QString hint = "the R install folder (containing bin/Rscript)";
+#endif
+    QString dir = QFileDialog::getExistingDirectory(this, "Select R directory", startDir);
+    if (dir.isEmpty()) return;
+
+    const QString exe = GlueRunner::rExecutableIn(dir);
+    if (exe.isEmpty()) {
+        QMessageBox::warning(this, "R directory",
+            "R was not found in:\n" + QDir::toNativeSeparators(dir) +
+            "\n\nPlease select " + hint + ".");
+        return;
+    }
+    GlueRunner::setRDir(dir);
+    setStatus("R directory set: " + QDir::toNativeSeparators(exe));
 }
 
 void MainWindow::onAbout()

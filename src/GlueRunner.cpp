@@ -8,6 +8,8 @@
 #include <QSettings>
 #include <QStandardPaths>
 #include <QThread>
+#include <QCollator>
+#include <algorithm>
 
 QString GlueRunner::GLUE_DIR;
 QString GlueRunner::GLUE_WORK;
@@ -195,18 +197,50 @@ QString GlueRunner::lastRunWarning()
 }
 
 // ── findRTerm ─────────────────────────────────────────────────────────────────
+QString GlueRunner::rDir()
+{
+    return QSettings("DSSAT", "GeneticsEditor").value("RDir").toString();
+}
+
+void GlueRunner::setRDir(const QString &dir)
+{
+    QSettings s("DSSAT", "GeneticsEditor");
+    if (dir.isEmpty()) s.remove("RDir");
+    else               s.setValue("RDir", dir);
+}
+
+QString GlueRunner::rExecutableIn(const QString &dir)
+{
+    if (dir.isEmpty()) return QString();
+#ifdef Q_OS_WIN
+    const QStringList rel = {"bin/x64/RTerm.exe", "x64/RTerm.exe", "RTerm.exe"};
+#else
+    const QStringList rel = {"bin/Rscript", "Rscript", "Resources/bin/Rscript"};
+#endif
+    for (const QString &r : rel) {
+        QString p = QDir(dir).filePath(r);
+        if (QFileInfo::exists(p)) return QDir::cleanPath(p);
+    }
+    return QString();
+}
+
 QString GlueRunner::findRTerm()
 {
+    // 1. User-selected R directory
+    QString chosen = rExecutableIn(rDir());
+    if (!chosen.isEmpty()) return chosen;
+
+    // 2. Auto-detect
 #ifdef Q_OS_WIN
-    QStringList versions = {"R-4.6.0","R-4.5.3","R-4.5.2","R-4.5.1","R-4.4.2","R-4.4.1","R-4.3.3"};
-    QStringList bases    = {"C:/Program Files/R", "C:/PROGRA~1/R"};
+    QStringList bases = {"C:/Program Files/R", "C:/PROGRA~1/R"};
     for (const QString &base : bases) {
-        for (const QString &ver : versions) {
-            QString p = base + "/" + ver + "/bin/x64/RTerm.exe";
-            if (QFileInfo::exists(p)) return p;
-        }
-        QDir rBase(base);
-        for (const QString &d : rBase.entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+        // Newest version first (R-4.10.0 after R-4.9.x, so compare numerically)
+        QCollator coll;
+        coll.setNumericMode(true);
+        QStringList dirs = QDir(base).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+        std::sort(dirs.begin(), dirs.end(),
+                  [&coll](const QString &a, const QString &b) { return coll.compare(a, b) > 0; });
+        for (const QString &d : dirs) {
             QString p = base + "/" + d + "/bin/x64/RTerm.exe";
             if (QFileInfo::exists(p)) return p;
         }

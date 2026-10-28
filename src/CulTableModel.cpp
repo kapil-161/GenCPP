@@ -168,7 +168,7 @@ QVariant CulTableModel::data(const QModelIndex &index, int role) const
             }
         }
 
-        return tip;
+        return Config::wrappedTip(tip);
     }
 
     return QVariant();
@@ -205,7 +205,7 @@ QVariant CulTableModel::headerData(int section, Qt::Orientation orientation, int
         if (cal == "P") tip += "\n\nCalibration: Phenology";
         else if (cal == "G") tip += "\n\nCalibration: Growth";
         else if (cal == "N") tip += "\n\nCalibration: Not used";
-        return tip;
+        return Config::wrappedTip(tip);
     }
 
     if (role == Qt::FontRole) {

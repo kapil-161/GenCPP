@@ -49,6 +49,11 @@ public:
     static void prepareProcessTree(QProcess *process);
     static void killProcessTree(QProcess *process);
 
+    // Start R for GLUE with Windows error popups off. R, its workers and DSSAT
+    // inherit this, so a DSSAT run killed by Stop while starting exits quietly
+    // instead of leaving an "Application Error (0xc0000142)" box behind.
+    static void startQuiet(QProcess *process, const QString &program, const QStringList &args);
+
     // R executable inside an R install folder (R home, its bin, or bin/x64);
     // empty if none. Lets the user pick any of those levels.
     static QString rExecutableIn(const QString &dir);

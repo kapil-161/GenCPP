@@ -655,7 +655,8 @@ int CommandLineHandler::runGlue(const CommandLineArgs &a)
 #endif
     proc.setProcessChannelMode(QProcess::MergedChannels);
 
-    proc.start();
+    GlueRunner::prepareProcessTree(&proc);
+    GlueRunner::startQuiet(&proc, proc.program(), proc.arguments());
     if (!proc.waitForStarted(5000)) {
         fprintf(stderr, "ERROR: Failed to start RTerm\n");
         return 1;

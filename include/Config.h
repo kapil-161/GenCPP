@@ -39,6 +39,13 @@ namespace Config {
     const QColor INFO_COLOR      = QColor("#2196F3");
     const QColor MINMAX_COLOR    = QColor("#FFF9C4");   // yellow – MINIMA/MAXIMA rows
 
+    // Tooltip as rich text: Qt word-wraps rich-text tooltips, plain ones stay one
+    // line and can run off screen (long parameter descriptions). Keeps line breaks.
+    inline QString wrappedTip(const QString &text)
+    {
+        return "<p>" + text.toHtmlEscaped().replace('\n', "<br>") + "</p>";
+    }
+
     // Primary action button (Run GLUE, Add to Queue, Apply). Full state set so
     // hover/pressed/disabled don't fall back to the global or native style.
     const QString ACCENT_BUTTON_STYLE =

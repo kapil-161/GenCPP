@@ -227,13 +227,21 @@ void MainWindow::closeEvent(QCloseEvent *event)
 {
     // GLUE's R workers and DSSAT runs would otherwise keep going after exit
     if (m_glueQueue && m_glueQueue->isRunning()) {
-        if (QMessageBox::question(this, "GLUE is running",
-                "A GLUE calibration is still running.\n\nStop it and close?",
-                QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes) {
+        QMessageBox box(QMessageBox::Question, "GLUE is running",
+                        "A GLUE calibration is still running.\n\nStop it and close?",
+                        QMessageBox::Yes | QMessageBox::No, this);
+        box.setDefaultButton(QMessageBox::No);
+        // The run may finish while this is open: then there is nothing to stop, so close
+        auto finished = connect(m_glueQueue, &GlueQueueManager::queueChanged, &box, [&box, this]() {
+            if (!m_glueQueue->isRunning()) box.done(QMessageBox::Yes);
+        });
+        const int answer = box.exec();
+        disconnect(finished);
+        if (answer != QMessageBox::Yes) {
             event->ignore();
             return;
         }
-        m_glueQueue->stop();
+        if (m_glueQueue->isRunning()) m_glueQueue->stop();
     }
 
     // Flush any pending auto-save before closing

@@ -76,7 +76,7 @@ QVariant EcoTableModel::data(const QModelIndex &index, int role) const
     if (role == Qt::ToolTipRole) {
         if (col == COL_REFS)
             return QString("Number of cultivars referencing this ecotype");
-        return m_tips.value(columnName(col), columnName(col));
+        return Config::wrappedTip(m_tips.value(columnName(col), columnName(col)));
     }
 
     return QVariant();

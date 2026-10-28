@@ -14,6 +14,11 @@
 #ifndef Q_OS_WIN
 #include <signal.h>
 #include <unistd.h>
+#else
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
 #endif
 
 QString GlueRunner::GLUE_DIR;
@@ -235,7 +240,22 @@ void GlueRunner::prepareProcessTree(QProcess *process)
     // Own process group, so killProcessTree() reaches the R workers and DSSAT too
     process->setChildProcessModifier([]() { ::setpgid(0, 0); });
 #else
-    Q_UNUSED(process);  // taskkill /T follows the parent-child links instead
+    // taskkill /T follows the parent-child links; just make sure the child
+    // inherits our error mode (see startQuiet) rather than the default one
+    process->setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments *a) {
+        a->flags &= ~static_cast<DWORD>(CREATE_DEFAULT_ERROR_MODE);
+    });
+#endif
+}
+
+void GlueRunner::startQuiet(QProcess *process, const QString &program, const QStringList &args)
+{
+#ifdef Q_OS_WIN
+    const UINT old = SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
+    process->start(program, args);
+    SetErrorMode(old);
+#else
+    process->start(program, args);
 #endif
 }
 

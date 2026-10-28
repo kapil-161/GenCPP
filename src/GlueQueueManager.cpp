@@ -100,6 +100,7 @@ void GlueQueueManager::runNext()
 
     if (m_currentIndex < 0) {
         m_running = false;
+        emit queueChanged();   // queue went idle: panel buttons, close prompt
         return;
     }
 
@@ -151,10 +152,10 @@ void GlueQueueManager::runNext()
     // RTerm.exe requires an explicit -f flag to execute a script file; a bare
     // trailing filename is silently ignored, leaving RTerm idle at an
     // interactive prompt (0% CPU, never finishes) instead of running GLUE.r.
-    m_process->start(rterm, {"--slave", "-f", GlueRunner::GLUE_DIR + "/GLUE.r"});
+    GlueRunner::startQuiet(m_process, rterm, {"--slave", "-f", GlueRunner::GLUE_DIR + "/GLUE.r"});
 #else
     // Rscript (used on macOS/Linux) runs a bare filename argument directly.
-    m_process->start(rterm, {"--slave", GlueRunner::GLUE_DIR + "/GLUE.r"});
+    GlueRunner::startQuiet(m_process, rterm, {"--slave", GlueRunner::GLUE_DIR + "/GLUE.r"});
 #endif
 
     m_pollTimer = new QTimer(this);

@@ -90,6 +90,7 @@ set(SOURCES
     src/BackupManager.cpp
     src/SpeGraphWidget.cpp
     src/SpeGraphBuilder.cpp
+    src/FrozenTableView.cpp
     src/GlueWizard.cpp
     src/GlueRunner.cpp
     src/GlueQueueManager.cpp
@@ -115,6 +116,7 @@ set(HEADERS
     include/BackupManager.h
     include/SpeGraphWidget.h
     include/SpeGraphBuilder.h
+    include/FrozenTableView.h
     include/GlueWizard.h
     include/GlueRunner.h
     include/GlueQueueManager.h

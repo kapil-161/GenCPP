@@ -21,6 +21,9 @@ void CulTableModel::setCalibrationTypes(const QMap<QString, QString> &types)
 {
     m_calibTypes = types;
     emit headerDataChanged(Qt::Horizontal, COL_PARAM0, columnCount() - 1);
+    if (rowCount() > 0)   // [N] columns' values are drawn grey
+        emit dataChanged(index(0, COL_PARAM0), index(rowCount() - 1, columnCount() - 1),
+                         {Qt::ForegroundRole});
 }
 
 void CulTableModel::setCalibrationTypeForParam(const QString &paramName, const QString &type)
@@ -33,6 +36,8 @@ void CulTableModel::setCalibrationTypeForParam(const QString &paramName, const Q
     for (int col = COL_PARAM0; col < columnCount(); ++col) {
         if (columnName(col) == paramName) {
             emit headerDataChanged(Qt::Horizontal, col, col);
+            if (rowCount() > 0)
+                emit dataChanged(index(0, col), index(rowCount() - 1, col), {Qt::ForegroundRole});
             break;
         }
     }
@@ -145,6 +150,11 @@ QVariant CulTableModel::data(const QModelIndex &index, int role) const
         }
         return QVariant();
     }
+
+    // [N] parameters are left alone by GLUE: grey their values like their header
+    if (role == Qt::ForegroundRole && col >= COL_PARAM0
+        && m_calibTypes.value(columnName(col)) == "N")
+        return QColor("#6B7178");
 
     if (role == Qt::FontRole && row.isMinMax) {
         QFont f;

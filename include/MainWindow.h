@@ -96,6 +96,9 @@ private:
     void buildSpeNavigator();
     void setStatus(const QString &msg, bool error = false);
     void selectNewCulRow(int sourceRow);
+    void updateCulCount();
+    void updateWindowTitle();
+    void updateSaveIndicators();
     // GlueRunner::unsupportedReason() plus whether another model of the crop works
     QString glueUnsupportedReason(const QString &cropKey) const;
     void updateCalibrationHeaderLine();
@@ -115,7 +118,10 @@ private:
     CulTableModel *m_culModel;
     class CulSortProxy *m_culProxy = nullptr;
     QPushButton *m_culAddBtn, *m_culDelBtn, *m_culDupBtn;
-    QPushButton *m_culSaveBtn, *m_culRefreshBtn, *m_culShowUsedBtn;
+    QPushButton *m_culRefreshBtn;
+    QLabel      *m_culSaveState = nullptr;     // Saved / Saving / Not saved
+    QCheckBox   *m_culShowUsedBtn = nullptr;   // "Used in experiments only"
+    QLabel      *m_culCountLabel  = nullptr;   // "13 of 116 cultivars"
     QPushButton *m_culGlueQueueBtn = nullptr;
     bool        m_culDirty = false;
 
@@ -124,14 +130,16 @@ private:
     QTableView *m_ecoView;
     EcoTableModel *m_ecoModel;
     QSortFilterProxyModel *m_ecoProxy = nullptr;
-    QPushButton *m_ecoAddBtn, *m_ecoDelBtn, *m_ecoDupBtn, *m_ecoSaveBtn;
+    QPushButton *m_ecoAddBtn, *m_ecoDelBtn, *m_ecoDupBtn;
+    QLabel      *m_ecoSaveState = nullptr;
     bool        m_ecoDirty = false;
 
     // SPE tab
     QTextEdit   *m_speEdit;
     QListWidget *m_speNavList;
     QLineEdit   *m_speSearchEdit;
-    QPushButton *m_speSaveBtn;
+    QLabel      *m_speSaveState = nullptr;
+    bool         m_culSaveFailed = false, m_ecoSaveFailed = false, m_speSaveFailed = false;
     SpeGraphWidget *m_speGraphWidget;
     bool         m_speDirty = false;
 

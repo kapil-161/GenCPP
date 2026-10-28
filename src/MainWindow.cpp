@@ -24,6 +24,7 @@ public:
 #include "SpeEditor.h"
 #include "SpeSyntaxHighlighter.h"
 #include "SpeGraphBuilder.h"
+#include "FrozenTableView.h"
 #include "Config.h"
 #include "GlueRunner.h"
 #include "GlueQueueDialog.h"
@@ -69,6 +70,12 @@ public:
     explicit CulSortProxy(QObject *parent = nullptr)
         : QSortFilterProxyModel(parent) {}
 
+    // Row numbers in display order (the source row would show file positions)
+    QVariant headerData(int section, Qt::Orientation o, int role) const override {
+        if (o == Qt::Vertical && role == Qt::DisplayRole) return section + 1;
+        return QSortFilterProxyModel::headerData(section, o, role);
+    }
+
     void setUsedFilter(const QSet<QString> &usedVarNums) {
         m_usedVarNums = usedVarNums;
         m_filterActive = !usedVarNums.isEmpty();
@@ -105,6 +112,8 @@ protected:
         const QString rv = sourceModel()->data(sourceModel()->index(right.row(), 0)).toString();
         const bool lPin = (lv == "999991" || lv == "999992");
         const bool rPin = (rv == "999991" || rv == "999992");
+        if (lPin && rPin)   // MINIMA (999991) above MAXIMA (999992) in either direction
+            return (sortOrder() == Qt::AscendingOrder) ? lv < rv : lv > rv;
         if (lPin != rPin) {
             // Keep pinned rows above all regular rows regardless of sort direction.
             // For ascending:  pinned < normal  → return lPin
@@ -123,6 +132,12 @@ class EcoSortProxy : public QSortFilterProxyModel {
 public:
     explicit EcoSortProxy(QObject *parent = nullptr)
         : QSortFilterProxyModel(parent) {}
+
+    // Row numbers in display order (the source row would show file positions)
+    QVariant headerData(int section, Qt::Orientation o, int role) const override {
+        if (o == Qt::Vertical && role == Qt::DisplayRole) return section + 1;
+        return QSortFilterProxyModel::headerData(section, o, role);
+    }
 protected:
     bool lessThan(const QModelIndex &left, const QModelIndex &right) const override {
         // ECO# is always column 0 in the source model
@@ -130,6 +145,8 @@ protected:
         const QString rv = sourceModel()->data(sourceModel()->index(right.row(), 0)).toString();
         const bool lPin = (lv == "999991" || lv == "999992");
         const bool rPin = (rv == "999991" || rv == "999992");
+        if (lPin && rPin)   // MINIMA (999991) above MAXIMA (999992) in either direction
+            return (sortOrder() == Qt::AscendingOrder) ? lv < rv : lv > rv;
         if (lPin != rPin) {
             // Keep pinned rows (MINIMA/MAXIMA) above all regular rows regardless of sort direction
             return (sortOrder() == Qt::AscendingOrder) ? lPin : !lPin;
@@ -149,13 +166,26 @@ static QModelIndex activeIndex(const QAbstractItemView *view)
     return idx;
 }
 
+// One-line colour key under a table: swatches drawn with the colours the models use
+static QLabel *makeLegend(const QList<QPair<QColor, QString>> &swatches, const QString &extra = QString())
+{
+    QStringList parts;
+    for (const auto &sw : swatches)
+        parts << QString("<span style='background:%1; border:1px solid #B0B8C0;'>&nbsp;&nbsp;&nbsp;&nbsp;</span>&nbsp;%2")
+                     .arg(sw.first.name(), sw.second.toHtmlEscaped());
+    if (!extra.isEmpty()) parts << extra;
+    auto *l = new QLabel(parts.join("&nbsp;&nbsp;&nbsp;&nbsp;"));
+    l->setTextFormat(Qt::RichText);
+    l->setStyleSheet("color: #444; font-size: 11px; padding: 2px 2px;");
+    return l;
+}
+
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , m_culModel(new CulTableModel(this))
     , m_ecoModel(new EcoTableModel(this))
 {
-    setWindowTitle(QString("%1 v%2 — DSSAT Genetics Editor")
-                   .arg(Config::APP_NAME, Config::APP_VERSION));
+    setWindowTitle("DSSAT Genetics Editor");   // crop and file added on load; version is in Help > About
     setMinimumSize(Config::WIN_MIN_W, Config::WIN_MIN_H);
     resize(Config::WIN_W, Config::WIN_H);
 
@@ -180,20 +210,18 @@ MainWindow::MainWindow(QWidget *parent)
         "QTableView::item:selected { background-color: #0078D4; color: white; }"
         "QHeaderView::section { background-color: #E4E8ED; padding: 4px;"
         "  border: 1px solid #C9D6DF; font-weight: bold; }"
-        "QPushButton { background-color: #52A7E0; border: none; border-radius: 4px;"
-        "  padding: 6px 12px; font-weight: bold; color: white; min-width: 60px; }"
-        "QPushButton:hover { background-color: #6CB6E7; }"
-        "QPushButton:pressed { background-color: #3D8BC7; }"
-        "QPushButton:disabled { background-color: #C9D6DF; color: #6c757d; }"
-        "QPushButton#dangerBtn { background-color: #E53935; }"
-        "QPushButton#dangerBtn:hover { background-color: #EF5350; }"
-        "QPushButton#dangerBtn:pressed { background-color: #C62828; }"
-        "QPushButton#saveBtn { background-color: #43A047; }"
-        "QPushButton#saveBtn:hover { background-color: #5CB860; }"
-        "QPushButton#saveBtn:pressed { background-color: #2E7D32; }"
-        // #id rules outrank :disabled, so restate it for the coloured buttons
-        "QPushButton#dangerBtn:disabled, QPushButton#saveBtn:disabled"
-        "  { background-color: #C9D6DF; color: #6c757d; }"
+        // Buttons are plain (blue text, thin border); only the primary action
+        // (Config::ACCENT_BUTTON_STYLE) is filled, and Delete fills red on hover
+        "QPushButton { background-color: white; color: #1F6FB5; border: 1px solid #1F6FB5;"
+        "  border-radius: 4px; padding: 5px 12px; font-weight: bold; min-width: 60px; }"
+        "QPushButton:hover { background-color: #E8F1FA; }"
+        "QPushButton:pressed { background-color: #D0E3F5; }"
+        "QPushButton:disabled { background-color: #F0F3F6; color: #9AA5B1; border-color: #C9D6DF; }"
+        "QPushButton#dangerBtn { color: #C62828; border-color: #C62828; }"
+        "QPushButton#dangerBtn:hover { background-color: #C62828; color: white; }"
+        "QPushButton#dangerBtn:pressed { background-color: #A31515; color: white; }"
+        // #id rules outrank :disabled, so restate it for the danger button
+        "QPushButton#dangerBtn:disabled { background-color: #F0F3F6; color: #9AA5B1; border-color: #C9D6DF; }"
         "QTextEdit { background-color: white; border: 1px solid #C9D6DF; }"
         "QListWidget { background-color: white; border: 1px solid #C9D6DF; }"
         "QSplitter::handle { background-color: #C9D6DF; }"
@@ -269,18 +297,23 @@ void MainWindow::setupUI()
     vbox->addWidget(new QWidget(this));   // placeholder (bar added in setupCropBar)
 
     // Rebuild central after crop bar
-    QGroupBox *topGroup = new QGroupBox("DSSAT Configuration", central);
+    // One row (DSSAT folder | crop); the file name is shown in the window title
+    QGroupBox *topGroup = new QGroupBox(central);
     QGridLayout *topGrid = new QGridLayout(topGroup);
     topGrid->setHorizontalSpacing(8);
+    topGrid->setContentsMargins(8, 6, 8, 6);
 
-    topGrid->addWidget(new QLabel("DSSAT directory:"), 0, 0);
+    topGrid->addWidget(new QLabel("DSSAT folder:"), 0, 0);
     m_dssatDirEdit = new QLineEdit(Config::DSSAT_BASE);
+    m_dssatDirEdit->setToolTip(m_dssatDirEdit->text());
+    connect(m_dssatDirEdit, &QLineEdit::textChanged, m_dssatDirEdit, &QLineEdit::setToolTip);
     topGrid->addWidget(m_dssatDirEdit, 0, 1);
     m_browseButton = new QPushButton("Browse…");
     m_browseButton->setFixedWidth(80);
     topGrid->addWidget(m_browseButton, 0, 2);
 
-    topGrid->addWidget(new QLabel("Crop:"), 1, 0);
+    topGrid->addItem(new QSpacerItem(16, 1), 0, 3);
+    topGrid->addWidget(new QLabel("Crop:"), 0, 4);
     m_cropCombo = new CropComboBox;
     m_cropCombo->setMinimumWidth(280);
     {
@@ -299,12 +332,13 @@ void MainWindow::setupUI()
         );
         m_cropCombo->setView(popupView);
     }
-    topGrid->addWidget(m_cropCombo, 1, 1);
+    topGrid->addWidget(m_cropCombo, 0, 5);
     topGrid->setColumnStretch(1, 1);
+    topGrid->setColumnStretch(5, 1);
 
-    m_geneticsLabel = new QLabel("—");
-    m_geneticsLabel->setStyleSheet("color: #555; font-size: 10px;");
-    topGrid->addWidget(m_geneticsLabel, 2, 0, 1, 3);
+    // Current file: not shown here any more, but kept for the window title
+    m_geneticsLabel = new QLabel("—", topGroup);
+    m_geneticsLabel->setVisible(false);
 
     // Replace placeholder
     auto *placeholderItem = vbox->takeAt(0);
@@ -350,6 +384,19 @@ void MainWindow::setupMenuBar()
 
 void MainWindow::setupCropBar() {}  // logic merged into setupUI
 
+// Replaces the Save buttons: edits save automatically, this shows whether they have
+static QLabel *makeSaveState()
+{
+    auto *l = new QLabel("\u2713 Saved");
+    l->setMinimumWidth(90);
+    l->setAlignment(Qt::AlignVCenter | Qt::AlignRight);
+    l->setStyleSheet("color: #2E7D32;");
+    l->setToolTip(Config::wrappedTip("Changes are saved automatically about a second after each edit;"
+                                     " the previous file is kept as a timestamped .bak next to it."
+                                     "\nCtrl+S saves immediately."));
+    return l;
+}
+
 static QPushButton *makeBtn(const QString &text, const QString &objName = {})
 {
     auto *btn = new QPushButton(text);
@@ -370,17 +417,19 @@ void MainWindow::setupCulTab(QWidget *tab)
     m_culSearch = new QLineEdit;
     m_culSearch->setPlaceholderText("Filter by VAR# or VRNAME…");
     m_culSearch->setMaximumWidth(260);
+    m_culSearch->setMinimumWidth(170);   // toolbar is crowded: keep the filter usable
     toolbar->addWidget(m_culSearch);
     toolbar->addStretch();
 
     m_culAddBtn      = makeBtn("Add");
     m_culDelBtn      = makeBtn("Delete",    "dangerBtn");
     m_culDupBtn      = makeBtn("Duplicate");
-    m_culSaveBtn     = makeBtn("Save",      "saveBtn");
+    m_culSaveState   = makeSaveState();
     m_culRefreshBtn = makeBtn("Refresh");
-    m_culShowUsedBtn = makeBtn("Show Used");
-    m_culShowUsedBtn->setCheckable(true);
-    m_culShowUsedBtn->setToolTip("Show only cultivars used in experiment files");
+    m_culShowUsedBtn = new QCheckBox("Used in experiments only");
+    m_culShowUsedBtn->setToolTip("Show only cultivars listed in this crop's experiment files");
+    m_culCountLabel = new QLabel;
+    m_culCountLabel->setStyleSheet("color: #555;");
     QPushButton *culGlueBtn = makeBtn("Paste GLUE");
     culGlueBtn->setToolTip("Paste a GLUE-calibrated cultivar line to update or add a row");
     connect(culGlueBtn, &QPushButton::clicked, this, &MainWindow::onCulPasteGlue);
@@ -414,9 +463,18 @@ void MainWindow::setupCulTab(QWidget *tab)
         }
     });
 
-    for (auto *b : {m_culAddBtn, m_culDelBtn, m_culDupBtn, m_culSaveBtn,
-                    m_culRefreshBtn, m_culShowUsedBtn, culGlueBtn, addQueueBtn})
+    toolbar->insertWidget(toolbar->count() - 1, m_culShowUsedBtn);   // before the stretch
+    toolbar->insertWidget(toolbar->count() - 1, m_culCountLabel);
+    // Groups: rows | file | GLUE | save state
+    for (QPushButton *b : {m_culAddBtn, m_culDupBtn, m_culDelBtn})
         toolbar->addWidget(b);
+    toolbar->addSpacing(16);
+    toolbar->addWidget(m_culRefreshBtn);
+    toolbar->addSpacing(16);
+    toolbar->addWidget(culGlueBtn);
+    toolbar->addWidget(addQueueBtn);
+    toolbar->addSpacing(16);
+    toolbar->addWidget(m_culSaveState);
 
     vbox->addLayout(toolbar);
 
@@ -426,7 +484,7 @@ void MainWindow::setupCulTab(QWidget *tab)
     m_culProxy->setFilterKeyColumn(-1);
     m_culProxy->setFilterCaseSensitivity(Qt::CaseInsensitive);
 
-    m_culView = new QTableView;
+    m_culView = new FrozenTableView(4);   // VAR#, VRNAME, EXPNO, ECO# stay while parameters scroll
     m_culView->setModel(m_culProxy);
     m_culView->setAlternatingRowColors(true);
     m_culView->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
@@ -450,6 +508,22 @@ void MainWindow::setupCulTab(QWidget *tab)
     splitter->setStretchFactor(0, 3);
     splitter->setStretchFactor(1, 1);
     vbox->addWidget(splitter, 1);
+    vbox->addWidget(makeLegend({{Config::MINMAX_COLOR, "MINIMA / MAXIMA"},
+                                {Config::OOR_COLOR,    "Outside MINIMA–MAXIMA"}},
+        "<b style='color:#1565C0'>[P]</b> phenology &nbsp;<b style='color:#2E7D32'>[G]</b> growth"
+        " &nbsp;<b style='color:#9E9E9E'>[N]</b> not calibrated &nbsp;(right-click a column header to change)"));
+
+    // Queue panel only takes room once something is queued
+    m_gluePanel->setVisible(false);
+    connect(m_glueQueue, &GlueQueueManager::queueChanged, this, [this]() {
+        m_gluePanel->setVisible(!m_glueQueue->entries().isEmpty());
+    });
+
+    // "13 of 116 cultivars" next to the filter checkbox
+    for (auto sig : {&QAbstractItemModel::rowsInserted, &QAbstractItemModel::rowsRemoved})
+        connect(m_culProxy, sig, this, &MainWindow::updateCulCount);
+    connect(m_culProxy, &QAbstractItemModel::modelReset,    this, &MainWindow::updateCulCount);
+    connect(m_culProxy, &QAbstractItemModel::layoutChanged, this, &MainWindow::updateCulCount);
 
     // Auto-apply calibrated results to CUL model
     connect(m_glueQueue, &GlueQueueManager::entryFinished,
@@ -533,10 +607,12 @@ void MainWindow::setupEcoTab(QWidget *tab)
     m_ecoAddBtn  = makeBtn("Add");
     m_ecoDelBtn  = makeBtn("Delete",    "dangerBtn");
     m_ecoDupBtn  = makeBtn("Duplicate");
-    m_ecoSaveBtn = makeBtn("Save",      "saveBtn");
+    m_ecoSaveState = makeSaveState();
 
-    for (auto *b : {m_ecoAddBtn, m_ecoDelBtn, m_ecoDupBtn, m_ecoSaveBtn})
+    for (QPushButton *b : {m_ecoAddBtn, m_ecoDupBtn, m_ecoDelBtn})
         toolbar->addWidget(b);
+    toolbar->addSpacing(16);
+    toolbar->addWidget(m_ecoSaveState);
 
     vbox->addLayout(toolbar);
 
@@ -545,7 +621,7 @@ void MainWindow::setupEcoTab(QWidget *tab)
     m_ecoProxy->setFilterKeyColumn(-1);
     m_ecoProxy->setFilterCaseSensitivity(Qt::CaseInsensitive);
 
-    m_ecoView = new QTableView;
+    m_ecoView = new FrozenTableView(3);   // ECO#, ECONAME, CUL refs
     m_ecoView->setModel(m_ecoProxy);
     m_ecoView->setAlternatingRowColors(true);
     m_ecoView->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
@@ -553,6 +629,8 @@ void MainWindow::setupEcoTab(QWidget *tab)
     m_ecoView->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_ecoView->setSortingEnabled(true);
     vbox->addWidget(m_ecoView, 1);
+    vbox->addWidget(makeLegend({{Config::MINMAX_COLOR,  "MINIMA / MAXIMA"},
+                                {Config::WARNING_COLOR, "Ecotype not used by any cultivar"}}));
 
     new QShortcut(QKeySequence::Copy, m_ecoView, this, &MainWindow::onEcoCopyRow);
 }
@@ -589,8 +667,8 @@ void MainWindow::setupSpeTab(QWidget *tab)
     QPushButton *findBtn = new QPushButton("Find");
     toolbar->addWidget(findBtn);
     toolbar->addStretch();
-    m_speSaveBtn = makeBtn("Save", "saveBtn");
-    toolbar->addWidget(m_speSaveBtn);
+    m_speSaveState = makeSaveState();
+    toolbar->addWidget(m_speSaveState);
     editLayout->addLayout(toolbar);
 
     m_speEdit = new QTextEdit;
@@ -605,7 +683,10 @@ void MainWindow::setupSpeTab(QWidget *tab)
     editSplitter->addWidget(m_speGraphWidget);
     
     editSplitter->setStretchFactor(0, 3);
-    editSplitter->setStretchFactor(1, 1);
+    editSplitter->setStretchFactor(1, 2);
+    // Start with ~40% for the graph so its axis labels fit; a minimum height
+    // here would raise every tab's minimum and push the status bar out of view
+    editSplitter->setSizes({300, 220});
     
     editLayout->addWidget(editSplitter, 1);
     hbox->addLayout(editLayout, 1);
@@ -637,9 +718,8 @@ void MainWindow::connectSignals()
     connect(m_culAddBtn,      &QPushButton::clicked, this, &MainWindow::onCulAdd);
     connect(m_culDelBtn,      &QPushButton::clicked, this, &MainWindow::onCulDelete);
     connect(m_culDupBtn,      &QPushButton::clicked, this, &MainWindow::onCulDuplicate);
-    connect(m_culSaveBtn,     &QPushButton::clicked, this, &MainWindow::onCulSave);
     connect(m_culRefreshBtn,  &QPushButton::clicked, this, &MainWindow::onCulRefresh);
-    connect(m_culShowUsedBtn, &QPushButton::toggled, this, &MainWindow::onCulShowUsed);
+    connect(m_culShowUsedBtn, &QCheckBox::toggled, this, &MainWindow::onCulShowUsed);
     connect(m_culSearch,      &QLineEdit::textChanged, this, &MainWindow::onCulSearch);
     connect(m_culModel,       &CulTableModel::dataModified,
             [this](){ m_culDirty = true; setStatus("CUL modified…"); m_autoSaveTimer->start(); });
@@ -648,13 +728,22 @@ void MainWindow::connectSignals()
     connect(m_ecoAddBtn,  &QPushButton::clicked, this, &MainWindow::onEcoAdd);
     connect(m_ecoDelBtn,  &QPushButton::clicked, this, &MainWindow::onEcoDelete);
     connect(m_ecoDupBtn,  &QPushButton::clicked, this, &MainWindow::onEcoDuplicate);
-    connect(m_ecoSaveBtn, &QPushButton::clicked, this, &MainWindow::onEcoSave);
     connect(m_ecoSearch,  &QLineEdit::textChanged, this, &MainWindow::onEcoSearch);
     connect(m_ecoModel,   &EcoTableModel::dataModified,
             [this](){ m_ecoDirty = true; setStatus("ECO modified…"); m_autoSaveTimer->start(); });
 
     // SPE
-    connect(m_speSaveBtn, &QPushButton::clicked, this, &MainWindow::onSpeSave);
+
+    // Saved-state labels follow the dirty / failed flags; Ctrl+S saves right away
+    auto *saveStateTimer = new QTimer(this);
+    connect(saveStateTimer, &QTimer::timeout, this, &MainWindow::updateSaveIndicators);
+    saveStateTimer->start(300);
+    auto *saveNow = new QShortcut(QKeySequence::Save, this);
+    connect(saveNow, &QShortcut::activated, this, [this]() {
+        if (m_autoSaveTimer) m_autoSaveTimer->stop();
+        autoSaveAll();
+        updateSaveIndicators();
+    });
     connect(m_speEdit,    &QTextEdit::textChanged,
             [this](){ m_speDirty = true; setStatus("SPE modified…"); m_autoSaveTimer->start(); });
     connect(m_speNavList, &QListWidget::itemClicked,
@@ -772,7 +861,6 @@ void MainWindow::loadCrop(const QString &cropCode)
     // Reset "Show Used" toggle when crop changes
     m_culShowUsedBtn->blockSignals(true);
     m_culShowUsedBtn->setChecked(false);
-    m_culShowUsedBtn->setText("Show Used");
     m_culShowUsedBtn->blockSignals(false);
     m_culProxy->clearUsedFilter();
     // Disable GLUE up front for models GLUE.r refuses, instead of after a click
@@ -864,10 +952,10 @@ void MainWindow::loadFileType(const QString &fileType)
                 m_culProxy->setUsedFilter(usedVarNums);
                 m_culShowUsedBtn->blockSignals(true);
                 m_culShowUsedBtn->setChecked(true);
-                m_culShowUsedBtn->setText("Show All");
                 m_culShowUsedBtn->blockSignals(false);
-                setStatus(QString("Loaded CUL: %1 — showing %2 cultivar(s) used in experiments.")
-                              .arg(QFileInfo(m_currentCulPath).fileName()).arg(usedVarNums.size()));
+                updateCulCount();
+                setStatus(QString("Loaded CUL: %1 — %2 used in experiments.")
+                              .arg(QFileInfo(m_currentCulPath).fileName(), m_culCountLabel->text()));
             }
         }
     } else if (fileType == "ECO") {
@@ -897,6 +985,18 @@ void MainWindow::loadFileType(const QString &fileType)
             fileType == "ECO" ? QFileInfo(info.ecoFile).fileName() :
                                 QFileInfo(info.speFile).fileName())
     );
+    updateWindowTitle();
+}
+
+void MainWindow::updateWindowTitle()
+{
+    QString title = "DSSAT Genetics Editor";
+    if (m_cropCombo && m_cropCombo->currentIndex() >= 0) {
+        title += " — " + m_cropCombo->currentText();
+        const QString file = m_geneticsLabel ? m_geneticsLabel->text().section(": ", 1) : QString();
+        if (!file.isEmpty() && file != "—") title += " · " + file;
+    }
+    setWindowTitle(title);
 }
 
 void MainWindow::refreshEcoCrossRef()
@@ -1068,7 +1168,9 @@ void MainWindow::onCulSave()
                               " (highlighted; Refresh lists them)").arg(m_currentCulPath).arg(oor), true);
         else
             setStatus("CUL saved: " + m_currentCulPath);
+        m_culSaveFailed = false;
     } else {
+        m_culSaveFailed = true;
         setStatus("Failed to save: " + m_currentCulPath, true);
     }
 }
@@ -1254,6 +1356,21 @@ void MainWindow::onCulRefresh()
     }
 }
 
+void MainWindow::updateCulCount()
+{
+    auto regular = [](const QAbstractItemModel *m) {
+        int n = 0;
+        for (int r = 0; r < m->rowCount(); ++r) {
+            const QString v = m->index(r, CulTableModel::COL_VARNUM).data().toString();
+            if (v != "999991" && v != "999992") ++n;
+        }
+        return n;
+    };
+    const int total = regular(m_culModel), shown = regular(m_culProxy);
+    m_culCountLabel->setText(shown == total ? QString("%1 cultivars").arg(total)
+                                            : QString("%1 of %2 cultivars").arg(shown).arg(total));
+}
+
 void MainWindow::onCulSearch(const QString &text)
 {
     if (m_culProxy)
@@ -1264,7 +1381,6 @@ void MainWindow::onCulShowUsed(bool checked)
 {
     if (!checked) {
         m_culProxy->clearUsedFilter();
-        m_culShowUsedBtn->setText("Show Used");
         setStatus("Showing all cultivars.");
         return;
     }
@@ -1321,8 +1437,8 @@ void MainWindow::onCulShowUsed(bool checked)
     }
 
     m_culProxy->setUsedFilter(usedVarNums);
-    m_culShowUsedBtn->setText("Show All");
-    setStatus(QString("Showing %1 cultivar(s) used in experiments.").arg(usedVarNums.size()));
+    updateCulCount();
+    setStatus(QString("Showing %1 used in experiments.").arg(m_culCountLabel->text()));
 }
 
 // ─── ECO actions ─────────────────────────────────────────────────────────────
@@ -1428,7 +1544,9 @@ void MainWindow::onEcoSave()
                          m_ecoModel->layout(), m_ecoFooterLines)) {
         m_ecoDirty = false;
         setStatus("ECO saved: " + m_currentEcoPath);
+        m_ecoSaveFailed = false;
     } else {
+        m_ecoSaveFailed = true;
         setStatus("Failed to save: " + m_currentEcoPath, true);
     }
 }
@@ -1440,6 +1558,29 @@ void MainWindow::onEcoSearch(const QString &text)
 }
 
 // ─── Auto-save ───────────────────────────────────────────────────────────────
+void MainWindow::updateSaveIndicators()
+{
+    auto show = [](QLabel *l, bool dirty, bool failed) {
+        if (!l) return;
+        const QString state = failed ? "failed" : dirty ? "saving" : "saved";
+        if (l->property("state").toString() == state) return;
+        l->setProperty("state", state);
+        if (failed) {
+            l->setText("\u26A0 Not saved");
+            l->setStyleSheet("color: #C62828; font-weight: bold;");
+        } else if (dirty) {
+            l->setText("Saving\u2026");
+            l->setStyleSheet("color: #6B7178;");
+        } else {
+            l->setText("\u2713 Saved");
+            l->setStyleSheet("color: #2E7D32;");
+        }
+    };
+    show(m_culSaveState, m_culDirty, m_culSaveFailed);
+    show(m_ecoSaveState, m_ecoDirty, m_ecoSaveFailed);
+    show(m_speSaveState, m_speDirty, m_speSaveFailed);
+}
+
 void MainWindow::autoSaveAll()
 {
     if (m_culDirty) onCulSave();
@@ -1456,7 +1597,9 @@ void MainWindow::onSpeSave()
     if (SpeEditor::save(m_currentSpePath, m_speEdit->toPlainText())) {
         m_speDirty = false;
         setStatus("SPE saved: " + m_currentSpePath);
+        m_speSaveFailed = false;
     } else {
+        m_speSaveFailed = true;
         setStatus("Failed to save: " + m_currentSpePath, true);
     }
 }

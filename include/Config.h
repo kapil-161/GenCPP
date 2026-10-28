@@ -49,10 +49,10 @@ namespace Config {
     // Primary action button (Run GLUE, Add to Queue, Apply). Full state set so
     // hover/pressed/disabled don't fall back to the global or native style.
     const QString ACCENT_BUTTON_STYLE =
-        "QPushButton { font-weight: bold; background-color: #2196F3; color: white;"
+        "QPushButton { font-weight: bold; background-color: #1565C0; color: white;"
         "  border: none; border-radius: 4px; padding: 6px 12px; }"
-        "QPushButton:hover { background-color: #42A5F5; }"
-        "QPushButton:pressed { background-color: #1976D2; }"
+        "QPushButton:hover { background-color: #1A6FD1; }"
+        "QPushButton:pressed { background-color: #0D47A1; }"
         "QPushButton:disabled { background-color: #C9D6DF; color: #6c757d; }";
     const QColor OOR_COLOR       = QColor("#FFCDD2");   // red    – out-of-range values
     const QColor ECO_REF_COLOR   = QColor("#E8F5E9");   // green  – eco reference columns

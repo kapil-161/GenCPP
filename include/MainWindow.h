@@ -96,6 +96,8 @@ private:
     void buildSpeNavigator();
     void setStatus(const QString &msg, bool error = false);
     void selectNewCulRow(int sourceRow);
+    // GlueRunner::unsupportedReason() plus whether another model of the crop works
+    QString glueUnsupportedReason(const QString &cropKey) const;
     void updateCalibrationHeaderLine();
 
     // UI – top bar

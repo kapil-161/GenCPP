@@ -20,6 +20,7 @@ struct SpeGraphData {
     QString xAxisLabel;
     QString yAxisLabel;
     QStringList barCategories;            // organ labels for StackedBar X-axis
+    QStringList xTickLabels;              // Line: named X positions 1..n (e.g. growth stages)
     SpeGraphType type = SpeGraphType::Line;
 };
 

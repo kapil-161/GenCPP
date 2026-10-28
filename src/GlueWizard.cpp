@@ -522,6 +522,7 @@ void GlueWizard::onRunGlue()
 
     m_glueProcess = new QProcess(this);
     m_glueProcess->setWorkingDirectory(GlueRunner::GLUE_DIR);
+    GlueRunner::prepareProcessTree(m_glueProcess);
     connect(m_glueProcess, &QProcess::readyReadStandardOutput, this, &GlueWizard::onGlueOutput);
     connect(m_glueProcess, &QProcess::readyReadStandardError,  this, &GlueWizard::onGlueOutput);
     connect(m_glueProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
@@ -557,7 +558,7 @@ void GlueWizard::onStopGlue()
 {
     if (m_pollTimer) { m_pollTimer->stop(); m_pollTimer->deleteLater(); m_pollTimer = nullptr; }
     if (m_glueProcess && m_glueProcess->state() != QProcess::NotRunning) {
-        m_glueProcess->kill();
+        GlueRunner::killProcessTree(m_glueProcess);   // R, its workers and DSSAT
         m_logEdit->append("\n[Stopped by user]");
         m_progressLabel->setText("Stopped");
     }

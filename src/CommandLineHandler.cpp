@@ -4,6 +4,7 @@
 #include "DssatProParser.h"
 #include "GlueRunner.h"
 #include "Config.h"
+#include "SpeGraphBuilder.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -14,6 +15,7 @@
 #include <QTextStream>
 #include <QProcess>
 #include <QDebug>
+#include <QRegularExpression>
 
 #include <cstdio>
 
@@ -48,6 +50,11 @@ CommandLineArgs CommandLineHandler::parseArgs(const QStringList &args)
         } else if (a == "--glue") {
             r.glueMode = true;
             r.isValid  = true;
+        } else if (a == "--spe-report" && i+1 < args.size()) {
+            r.speReportDir = args[++i];
+            r.isValid      = true;
+        } else if (a == "--verbose") {
+            r.verbose = true;
         } else if (a == "--crop" && i+1 < args.size()) {
             r.cropCode = args[++i].toUpper();
         } else if (a == "--cultivar" && i+1 < args.size()) {
@@ -74,6 +81,7 @@ int CommandLineHandler::run(const QStringList &args)
 
     if (a.testMode) return runTests();
     if (a.glueMode) return runGlue(a);
+    if (!a.speReportDir.isEmpty()) return runSpeReport(a.speReportDir, a.verbose);
     return -1;
 }
 
@@ -549,7 +557,18 @@ int CommandLineHandler::runGlue(const CommandLineArgs &a)
     {
         const QString unsupported = GlueRunner::unsupportedReason(cropInfo);
         if (!unsupported.isEmpty()) {
+            QStringList supported;
+            for (const CropInfo &c : crops)
+                if (c.cropCode.compare(a.cropCode, Qt::CaseInsensitive) == 0
+                    && c.module != cropInfo.module
+                    && GlueRunner::unsupportedReason(c).isEmpty())
+                    supported << c.module;
             fprintf(stderr, "ERROR: %s\n", qPrintable(unsupported));
+            if (supported.isEmpty())
+                fprintf(stderr, "No GLUE-supported model is available for crop %s.\n",
+                        qPrintable(a.cropCode));
+            else
+                fprintf(stderr, "Use --model %s instead.\n", qPrintable(supported.join(" or --model ")));
             return 1;
         }
     }
@@ -669,6 +688,49 @@ int CommandLineHandler::runGlue(const CommandLineArgs &a)
         return code ? code : 2;
     }
     return code;
+}
+
+// ── SPE graph coverage report ─────────────────────────────────────────────────
+// Runs SpeGraphBuilder on every line of every .SPE file and lists the data
+// lines with two or more numbers that get no graph.
+int CommandLineHandler::runSpeReport(const QString &dir, bool verbose)
+{
+    const QStringList files = QDir(dir).entryList({"*.SPE"}, QDir::Files, QDir::Name);
+    int multi = 0, graphed = 0;
+    for (const QString &fn : files) {
+        QFile f(QDir(dir).filePath(fn));
+        if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) continue;
+        const QStringList lines = QString::fromLatin1(f.readAll()).split('\n');
+        QStringList missed;
+        for (int i = 0; i < lines.size(); ++i) {
+            const QString t = lines[i].trimmed();
+            if (t.isEmpty() || t.startsWith('!') || t.startsWith('*') || t.startsWith('@')) continue;
+            int n = 0;
+            for (const QString &tok : t.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts)) {
+                bool ok; tok.toDouble(&ok);
+                if (ok) ++n;
+            }
+            if (n < 2) continue;   // single values are scalars, not curves
+            ++multi;
+            SpeGraphData data;
+            if (SpeGraphBuilder::build(lines, i, data)) {
+                ++graphed;
+                if (verbose) {
+                    QStringList ser;
+                    for (const auto &s : data.series) ser << QString("%1[%2]").arg(s.label).arg(s.points.size());
+                    fprintf(stdout, "  OK %s:%d  %s  |  %s\n",qPrintable(fn), i + 1,
+                            qPrintable(data.title.left(70)), qPrintable(ser.join(' ').left(90)));
+                }
+            }
+            else missed << QString("  %1: %2").arg(i + 1, 4).arg(lines[i].trimmed().left(110));
+        }
+        if (!missed.isEmpty())
+            fprintf(stdout, "%s  (%d not graphed)\n%s\n", qPrintable(fn), (int)missed.size(),
+                    qPrintable(missed.join('\n')));
+    }
+    fprintf(stdout, "\nTOTAL: %d of %d multi-value lines graphed (%d files)\n",
+            graphed, multi, (int)files.size());
+    return 0;
 }
 
 void CommandLineHandler::printUsage()

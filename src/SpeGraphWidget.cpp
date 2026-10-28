@@ -11,6 +11,10 @@ const QVector<QColor> SpeGraphWidget::SERIES_COLORS = {
     QColor("#E64A19"),  // orange-red
     QColor("#388E3C"),  // green
     QColor("#7B1FA2"),  // purple
+    QColor("#00897B"),  // teal
+    QColor("#C2185B"),  // pink
+    QColor("#795548"),  // brown
+    QColor("#546E7A"),  // blue-grey
 };
 
 static const QVector<QColor> BAR_COLORS = {
@@ -64,8 +68,9 @@ void SpeGraphWidget::paintEvent(QPaintEvent *event)
         painter.setPen(QColor("#999999"));
         painter.drawText(rect(), Qt::AlignCenter,
             "Click a data line in the SPE editor to view its graph.\n"
-            "(Supports X/Y table pairs, 4-value response functions,\n"
-            " interleaved X,Y data, multi-series tables, and plant composition.)");
+            "(Response functions (LIN, QDR, INL, SIN, ...), X/Y arrays, @ tables,\n"
+            " cardinal temperatures, values by growth stage and plant composition.\n"
+            " Lines of separate single parameters have no graph.)");
         return;
     }
 
@@ -221,15 +226,30 @@ void SpeGraphWidget::paintEvent(QPaintEvent *event)
     if (rangeX == 0) rangeX = 1.0;
     if (rangeY == 0) rangeY = 1.0;
 
-    minX -= rangeX * 0.05;
-    maxX += rangeX * 0.05;
+    const bool namedX = !m_data.xTickLabels.isEmpty();
+    if (namedX) {
+        minX = 0.5;
+        maxX = m_data.xTickLabels.size() + 0.5;
+    } else {
+        minX -= rangeX * 0.05;
+        maxX += rangeX * 0.05;
+    }
     minY -= rangeY * 0.10;
     maxY += rangeY * 0.10;
 
-    // Margins — extra right space if legend needed
+    // Margins: left fits the widest Y tick label, right fits the legend
+    // (up to 40% of the width, then labels are elided)
+    const QFontMetrics fm = painter.fontMetrics();
     bool showLegend = m_data.series.size() > 1;
-    int marginLeft   = 52;
-    int marginRight  = showLegend ? 115 : 20;
+    int tickW = 0;
+    for (int i = 0; i <= 4; ++i)
+        tickW = std::max(tickW, fm.horizontalAdvance(QString::number(minY + (maxY - minY) * i / 4.0, 'g', 4)));
+    int legendText = 0;
+    if (showLegend)
+        for (const auto &s : m_data.series) legendText = std::max(legendText, fm.horizontalAdvance(s.label));
+    legendText = std::min(legendText, (int)(width() * 0.40));
+    int marginLeft   = std::max(52, tickW + 30);
+    int marginRight  = showLegend ? legendText + 34 : 20;
     int marginTop    = 28;
     int marginBottom = 36;
 
@@ -255,15 +275,29 @@ void SpeGraphWidget::paintEvent(QPaintEvent *event)
     painter.drawLine(graphRect.topLeft(),    graphRect.bottomLeft());
 
     // Grid lines + tick labels
-    for (int i = 0; i <= 4; ++i) {
-        double xVal = minX + (maxX - minX) * i / 4.0;
-        int    xPos = graphRect.left() + graphRect.width() * i / 4;
-        painter.setPen(QPen(QColor("#E0E0E0"), 1, Qt::DashLine));
-        painter.drawLine(xPos, graphRect.top(), xPos, graphRect.bottom());
-        painter.setPen(Qt::black);
-        painter.drawText(QRect(xPos - 30, graphRect.bottom() + 3, 60, 16),
-                         Qt::AlignHCenter | Qt::AlignTop,
-                         QString::number(xVal, 'g', 4));
+    if (namedX) {
+        const int n = m_data.xTickLabels.size();
+        const int slot = graphRect.width() / n;
+        for (int i = 0; i < n; ++i) {
+            int xPos = graphRect.left() + (int)((i + 1 - minX) / (maxX - minX) * graphRect.width());
+            painter.setPen(QPen(QColor("#E0E0E0"), 1, Qt::DashLine));
+            painter.drawLine(xPos, graphRect.top(), xPos, graphRect.bottom());
+            painter.setPen(Qt::black);
+            painter.drawText(QRect(xPos - slot / 2, graphRect.bottom() + 3, slot, 16),
+                             Qt::AlignHCenter | Qt::AlignTop,
+                             painter.fontMetrics().elidedText(m_data.xTickLabels[i], Qt::ElideRight, slot - 4));
+        }
+    } else {
+        for (int i = 0; i <= 4; ++i) {
+            double xVal = minX + (maxX - minX) * i / 4.0;
+            int    xPos = graphRect.left() + graphRect.width() * i / 4;
+            painter.setPen(QPen(QColor("#E0E0E0"), 1, Qt::DashLine));
+            painter.drawLine(xPos, graphRect.top(), xPos, graphRect.bottom());
+            painter.setPen(Qt::black);
+            painter.drawText(QRect(xPos - 30, graphRect.bottom() + 3, 60, 16),
+                             Qt::AlignHCenter | Qt::AlignTop,
+                             QString::number(xVal, 'g', 4));
+        }
     }
     for (int i = 0; i <= 4; ++i) {
         double yVal = minY + (maxY - minY) * i / 4.0;
@@ -303,7 +337,7 @@ void SpeGraphWidget::paintEvent(QPaintEvent *event)
     // Draw each series
     for (int si = 0; si < m_data.series.size(); ++si) {
         const auto &s = m_data.series[si];
-        if (s.points.size() < 2) continue;
+        if (s.points.isEmpty()) continue;   // a single point still shows as a dot
 
         QColor color = SERIES_COLORS[si % SERIES_COLORS.size()];
 
@@ -321,11 +355,14 @@ void SpeGraphWidget::paintEvent(QPaintEvent *event)
         painter.setBrush(Qt::NoBrush);
         painter.drawPath(path);
 
-        painter.setBrush(color);
-        painter.setPen(Qt::NoPen);
-        int dotR = (s.points.size() > 20) ? 2 : 3;  // smaller dots for smooth curves
-        for (const auto &sp : screenPts)
-            painter.drawEllipse(sp, dotR, dotR);
+        // Dots mark the data values; sampled response curves are lines only
+        if (s.points.size() <= 40) {
+            painter.setBrush(color);
+            painter.setPen(Qt::NoPen);
+            int dotR = (s.points.size() > 20) ? 2 : 3;
+            for (const auto &sp : screenPts)
+                painter.drawEllipse(sp, dotR, dotR);
+        }
     }
 
     // Legend (only when multiple series)
@@ -337,9 +374,9 @@ void SpeGraphWidget::paintEvent(QPaintEvent *event)
             int rowY = ly + si * 18;
             painter.fillRect(lx, rowY + 2, 14, 10, c);
             painter.setPen(Qt::black);
-            painter.drawText(lx + 18, rowY, 94, 14,
+            painter.drawText(lx + 18, rowY, legendText + 4, 14,
                              Qt::AlignLeft | Qt::AlignVCenter,
-                             m_data.series[si].label);
+                             fm.elidedText(m_data.series[si].label, Qt::ElideRight, legendText + 4));
         }
     }
 }

@@ -13,6 +13,7 @@
 #include <QFile>
 #include <QProcess>
 #include <QFont>
+#include <QMessageBox>
 
 GlueQueuePanel::GlueQueuePanel(GlueQueueManager *manager, QWidget *parent)
     : QWidget(parent)
@@ -53,13 +54,22 @@ GlueQueuePanel::GlueQueuePanel(GlueQueueManager *manager, QWidget *parent)
     QHBoxLayout *btnRow = new QHBoxLayout;
     m_removeBtn    = new QPushButton("Remove Selected");
     m_clearDoneBtn = new QPushButton("Clear Done");
+    m_stopBtn      = new QPushButton("Stop GLUE");
+    m_stopBtn->setObjectName("dangerBtn");
+    m_stopBtn->setToolTip("Stop the running calibration, including its R workers and DSSAT runs");
+    m_resumeBtn    = new QPushButton("Resume Queue");
+    m_resumeBtn->setToolTip("Run the pending entries");
     btnRow->addWidget(m_removeBtn);
     btnRow->addWidget(m_clearDoneBtn);
     btnRow->addStretch();
+    btnRow->addWidget(m_resumeBtn);
+    btnRow->addWidget(m_stopBtn);
     vbox->addLayout(btnRow);
 
     connect(m_removeBtn,    &QPushButton::clicked, this, &GlueQueuePanel::onRemove);
     connect(m_clearDoneBtn, &QPushButton::clicked, this, &GlueQueuePanel::onClearDone);
+    connect(m_stopBtn,      &QPushButton::clicked, this, &GlueQueuePanel::onStop);
+    connect(m_resumeBtn,    &QPushButton::clicked, manager, &GlueQueueManager::start);
 
     connect(manager, &GlueQueueManager::queueChanged,   this, &GlueQueuePanel::refresh);
     connect(manager, &GlueQueueManager::progressUpdated,
@@ -102,16 +112,22 @@ void GlueQueuePanel::refresh()
             case GlueQueueStatus::Running: statusStr = "Running…"; anyRunning = true; break;
             case GlueQueueStatus::Done:    statusStr = "✓ Done (double-click to view)"; break;
             case GlueQueueStatus::Failed:  statusStr = "✗ Failed (double-click for log): " + e.errorMsg.section('\n', 0, 0); break;
+            case GlueQueueStatus::Stopped: statusStr = "■ Stopped by user"; break;
         }
         auto *statusItem = new QTableWidgetItem(statusStr);
         if (e.status == GlueQueueStatus::Done)
             statusItem->setForeground(Qt::darkGreen);
         else if (e.status == GlueQueueStatus::Failed)
             statusItem->setForeground(Qt::red);
+        else if (e.status == GlueQueueStatus::Stopped)
+            statusItem->setForeground(QColor("#E65100"));
         else if (e.status == GlueQueueStatus::Running)
             statusItem->setForeground(QColor("#2196F3"));
         m_table->setItem(i, 5, statusItem);
     }
+
+    m_stopBtn->setEnabled(anyRunning);
+    m_resumeBtn->setVisible(!m_manager->isRunning() && m_manager->hasPending());
 
     m_progressBar->setVisible(anyRunning);
     m_progressLabel->setVisible(anyRunning);
@@ -129,6 +145,22 @@ void GlueQueuePanel::onRemove()
     if (row >= entries.size()) return;
     if (entries[row].status == GlueQueueStatus::Running) return;
     m_manager->removeEntry(row);
+}
+
+void GlueQueuePanel::onStop()
+{
+    if (!m_manager->isRunning()) return;
+    QString name;
+    for (const auto &e : m_manager->entries())
+        if (e.status == GlueQueueStatus::Running) name = e.cultivarId + " " + e.cultivarName;
+    const bool pending = m_manager->hasPending();
+    if (QMessageBox::question(this, "Stop GLUE",
+            QString("Stop the GLUE calibration for %1?\n\nIts results so far will be lost.%2")
+                .arg(name.trimmed(),
+                     pending ? "\nPending entries stay in the queue (use Resume Queue to run them)." : ""),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
+        return;
+    m_manager->stop();
 }
 
 void GlueQueuePanel::onClearDone()

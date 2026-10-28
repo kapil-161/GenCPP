@@ -9,7 +9,7 @@
 #include "DssatProParser.h"
 #include "GlueRunner.h"
 
-enum class GlueQueueStatus { Pending, Running, Done, Failed };
+enum class GlueQueueStatus { Pending, Running, Done, Failed, Stopped };
 
 struct GlueQueueEntry {
     QString        cultivarId;
@@ -33,12 +33,14 @@ class GlueQueueManager : public QObject
 
 public:
     explicit GlueQueueManager(QObject *parent = nullptr);
+    ~GlueQueueManager() override;
 
     void addEntry(const GlueQueueEntry &entry);
     void removeEntry(int index);
     void clearDone();
     const QList<GlueQueueEntry> &entries() const { return m_entries; }
     bool isRunning() const { return m_running; }
+    bool hasPending() const;
 
 signals:
     void queueChanged();
@@ -48,6 +50,8 @@ signals:
 
 public slots:
     void start();
+    // Stop the running calibration (R, its workers and DSSAT) and the queue;
+    // the running entry becomes Stopped, pending entries stay pending.
     void stop();
 
 private slots:

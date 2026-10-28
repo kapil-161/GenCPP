@@ -20,6 +20,7 @@ public:
 private slots:
     void onRemove();
     void onClearDone();
+    void onStop();
     void onRowDoubleClicked(int row, int col);
 
 private:
@@ -27,6 +28,8 @@ private:
     QTableWidget     *m_table;
     QPushButton      *m_removeBtn;
     QPushButton      *m_clearDoneBtn;
+    QPushButton      *m_stopBtn;
+    QPushButton      *m_resumeBtn;
     QProgressBar     *m_progressBar;
     QLabel           *m_progressLabel;
 };

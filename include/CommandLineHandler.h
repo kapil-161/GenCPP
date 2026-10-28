@@ -9,6 +9,8 @@ struct CommandLineArgs {
     bool isValid     = false;
     bool testMode    = false;   // --test
     bool glueMode    = false;   // --glue
+    QString speReportDir;       // --spe-report <dir>
+    bool    verbose  = false;   // --verbose: also list each graph built
     QString cropCode;           // e.g. "WH"
     QString cultivarId;         // e.g. "IB0488"
     QString cultivarName;       // e.g. "NEWTON"
@@ -34,6 +36,7 @@ public:
 private:
     int runTests();
     int runGlue(const CommandLineArgs &a);
+    int runSpeReport(const QString &dir, bool verbose);
 
     static void printUsage();
 };

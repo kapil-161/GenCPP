@@ -9,7 +9,12 @@
 #include <QStandardPaths>
 #include <QThread>
 #include <QCollator>
+#include <QProcess>
 #include <algorithm>
+#ifndef Q_OS_WIN
+#include <signal.h>
+#include <unistd.h>
+#endif
 
 QString GlueRunner::GLUE_DIR;
 QString GlueRunner::GLUE_WORK;
@@ -124,7 +129,7 @@ QString GlueRunner::unsupportedReason(const CropInfo &cropInfo)
         if (c[0].trimmed().toUpper() == model
             && c[1].trimmed().compare(cropInfo.cropCode, Qt::CaseInsensitive) == 0)
             return QString("GLUE does not support model %1 for crop %2%3 (listed in "
-                           "GlueExcludedModels.csv). Choose another model for this crop.")
+                           "GlueExcludedModels.csv).")
                 .arg(cropInfo.modelId.isEmpty() ? cropInfo.module : cropInfo.modelId,
                      cropInfo.cropCode,
                      c.size() > 2 && !c[2].trimmed().isEmpty() ? " (" + c[2].trimmed() + ")" : QString());
@@ -222,6 +227,30 @@ QString GlueRunner::rExecutableIn(const QString &dir)
         if (QFileInfo::exists(p)) return QDir::cleanPath(p);
     }
     return QString();
+}
+
+void GlueRunner::prepareProcessTree(QProcess *process)
+{
+#ifndef Q_OS_WIN
+    // Own process group, so killProcessTree() reaches the R workers and DSSAT too
+    process->setChildProcessModifier([]() { ::setpgid(0, 0); });
+#else
+    Q_UNUSED(process);  // taskkill /T follows the parent-child links instead
+#endif
+}
+
+void GlueRunner::killProcessTree(QProcess *process)
+{
+    if (!process || process->state() == QProcess::NotRunning) return;
+    const qint64 pid = process->processId();
+#ifdef Q_OS_WIN
+    // /T: R workers (Rscript.exe) and their DSSAT runs (DSCSM048.EXE) as well
+    QProcess::execute("taskkill", {"/PID", QString::number(pid), "/T", "/F"});
+#else
+    ::kill(-static_cast<pid_t>(pid), SIGKILL);
+#endif
+    process->kill();
+    process->waitForFinished(3000);
 }
 
 QString GlueRunner::findRTerm()

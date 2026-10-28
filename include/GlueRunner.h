@@ -8,6 +8,8 @@
 #include <QList>
 #include "DssatProParser.h"
 
+class QProcess;
+
 struct TreatmentEntry {
     int    number;
     QString name;   // from TNAME column; may be empty in CLI path
@@ -40,6 +42,12 @@ public:
 
     // Find RTerm.exe / Rscript: the user-selected R directory if set, else auto-detect
     static QString findRTerm();
+
+    // GLUE.r starts parallel R workers that each run DSSAT; QProcess::kill()
+    // stops only R itself and leaves those running. Call prepareProcessTree()
+    // before start() and killProcessTree() to stop R and everything it started.
+    static void prepareProcessTree(QProcess *process);
+    static void killProcessTree(QProcess *process);
 
     // R executable inside an R install folder (R home, its bin, or bin/x64);
     // empty if none. Lets the user pick any of those levels.

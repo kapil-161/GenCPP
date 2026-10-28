@@ -13,9 +13,26 @@
 #include "Config.h"
 #include "SingleInstanceApp.h"
 #include "CommandLineHandler.h"
+#include "SpeGraphBuilder.h"
+#include <QApplication>
 
 int main(int argc, char *argv[])
 {
+    // --spe-render <file.SPE> <line> <out.png>: draw one SPE line's graph to an
+    // image (checks the graphs without the GUI). Needs a QApplication for widgets.
+    if (argc == 5 && QString(argv[1]) == "--spe-render") {
+        QApplication app(argc, argv);
+        QFile f(QString::fromLocal8Bit(argv[2]));
+        if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) return 1;
+        const QStringList lines = QString::fromLatin1(f.readAll()).split('\n');
+        SpeGraphData data;
+        if (!SpeGraphBuilder::build(lines, QString(argv[3]).toInt() - 1, data)) return 2;
+        SpeGraphWidget w;
+        w.resize(640, 380);
+        w.setData(data);
+        return w.grab().save(QString::fromLocal8Bit(argv[4])) ? 0 : 3;
+    }
+
     // Handle CLI modes (--test, --glue) before creating GUI
     {
         QCoreApplication cliApp(argc, argv);

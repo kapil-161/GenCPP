@@ -17,6 +17,22 @@ static const QStringList GLUE_PHASES = {
 GlueQueueManager::GlueQueueManager(QObject *parent)
     : QObject(parent) {}
 
+GlueQueueManager::~GlueQueueManager()
+{
+    // Don't leave R workers and DSSAT running after the app exits
+    if (m_process) {
+        disconnect(m_process, nullptr, this, nullptr);
+        GlueRunner::killProcessTree(m_process);
+    }
+}
+
+bool GlueQueueManager::hasPending() const
+{
+    for (const auto &e : m_entries)
+        if (e.status == GlueQueueStatus::Pending) return true;
+    return false;
+}
+
 void GlueQueueManager::addEntry(const GlueQueueEntry &entry)
 {
     m_entries.append(entry);
@@ -38,7 +54,7 @@ void GlueQueueManager::clearDone()
 {
     for (int i = m_entries.size() - 1; i >= 0; --i) {
         auto s = m_entries[i].status;
-        if (s == GlueQueueStatus::Done || s == GlueQueueStatus::Failed)
+        if (s == GlueQueueStatus::Done || s == GlueQueueStatus::Failed || s == GlueQueueStatus::Stopped)
             m_entries.removeAt(i);
     }
     emit queueChanged();
@@ -54,7 +70,21 @@ void GlueQueueManager::start()
 void GlueQueueManager::stop()
 {
     m_running = false;
+    if (m_process) {
+        // A user stop is not a finished run: skip onGlueFinished()
+        disconnect(m_process, nullptr, this, nullptr);
+        GlueRunner::killProcessTree(m_process);
+    }
     cleanup();
+
+    if (m_currentIndex >= 0 && m_currentIndex < m_entries.size()
+        && m_entries[m_currentIndex].status == GlueQueueStatus::Running) {
+        m_entries[m_currentIndex].status   = GlueQueueStatus::Stopped;
+        m_entries[m_currentIndex].errorMsg = "Stopped by user";
+        emit entryFinished(m_currentIndex, false, {});
+    }
+    m_currentIndex = -1;
+    emit queueChanged();
 }
 
 void GlueQueueManager::runNext()
@@ -110,6 +140,7 @@ void GlueQueueManager::runNext()
 
     m_process = new QProcess(this);
     m_process->setWorkingDirectory(GlueRunner::GLUE_DIR);
+    GlueRunner::prepareProcessTree(m_process);
     connect(m_process, &QProcess::readyReadStandardOutput, this, &GlueQueueManager::onGlueOutput);
     connect(m_process, &QProcess::readyReadStandardError,  this, &GlueQueueManager::onGlueOutput);
     connect(m_process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),

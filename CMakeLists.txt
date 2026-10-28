@@ -89,6 +89,7 @@ set(SOURCES
     src/EcoTableModel.cpp
     src/BackupManager.cpp
     src/SpeGraphWidget.cpp
+    src/SpeGraphBuilder.cpp
     src/GlueWizard.cpp
     src/GlueRunner.cpp
     src/GlueQueueManager.cpp
@@ -113,6 +114,7 @@ set(HEADERS
     include/EcoTableModel.h
     include/BackupManager.h
     include/SpeGraphWidget.h
+    include/SpeGraphBuilder.h
     include/GlueWizard.h
     include/GlueRunner.h
     include/GlueQueueManager.h

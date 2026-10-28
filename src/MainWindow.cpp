@@ -1,6 +1,8 @@
 #include "MainWindow.h"
 #include <QComboBox>
 #include <QListView>
+#include <QScreen>
+#include <algorithm>
 
 // QComboBox subclass that resizes the popup to a fixed grid after Qt shows it
 class CropComboBox : public QComboBox {
@@ -12,8 +14,17 @@ public:
         if (QWidget *popup = this->findChild<QFrame*>()) {
             popup->setFixedWidth(180 * 4);   // 4 columns x 180px
             popup->setFixedHeight(26 * 13);  // 13 rows x 26px
-            // Re-center below the combo button
-            QPoint pos = mapToGlobal(QPoint(0, height()));
+            // Centred below the combo, kept on screen (the combo sits on the right
+            // half of the window, so the 720px grid could run past the screen edge)
+            QPoint pos = mapToGlobal(QPoint(width() / 2 - popup->width() / 2, height()));
+            if (const QScreen *scr = screen()) {
+                const QRect area = scr->availableGeometry();
+                if (pos.x() < area.left()) pos.setX(area.left());
+                if (pos.x() + popup->width() > area.right())
+                    pos.setX(std::max(area.left(), area.right() - popup->width()));
+                if (pos.y() + popup->height() > area.bottom())    // no room below: open above
+                    pos.setY(std::max(area.top(), mapToGlobal(QPoint(0, 0)).y() - popup->height()));
+            }
             popup->move(pos);
         }
     }

@@ -139,6 +139,16 @@ protected:
 };
 
 // ─── constructor ────────────────────────────────────────────────────────────
+// Row the user means: the current cell, else the first selected cell (row
+// selection from the header, screen readers and UI Automation leave no current cell).
+static QModelIndex activeIndex(const QAbstractItemView *view)
+{
+    QModelIndex idx = view->currentIndex();
+    if (!idx.isValid() && view->selectionModel() && view->selectionModel()->hasSelection())
+        idx = view->selectionModel()->selectedIndexes().first();
+    return idx;
+}
+
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , m_culModel(new CulTableModel(this))
@@ -181,6 +191,9 @@ MainWindow::MainWindow(QWidget *parent)
         "QPushButton#saveBtn { background-color: #43A047; }"
         "QPushButton#saveBtn:hover { background-color: #5CB860; }"
         "QPushButton#saveBtn:pressed { background-color: #2E7D32; }"
+        // #id rules outrank :disabled, so restate it for the coloured buttons
+        "QPushButton#dangerBtn:disabled, QPushButton#saveBtn:disabled"
+        "  { background-color: #C9D6DF; color: #6c757d; }"
         "QTextEdit { background-color: white; border: 1px solid #C9D6DF; }"
         "QListWidget { background-color: white; border: 1px solid #C9D6DF; }"
         "QSplitter::handle { background-color: #C9D6DF; }"
@@ -198,12 +211,13 @@ MainWindow::MainWindow(QWidget *parent)
         move((sg.width() - width()) / 2, (sg.height() - height()) / 2);
     }
 
+    // Resolve GLUE paths (QSettings → common locations → DSSATPRO DGL entry)
+    // before the first crop loads: Run GLUE's state reads GlueExcludedModels.csv
+    GlueRunner::resolvePaths(Config::DSSATPRO_FILE);
+
     // Auto-load DSSAT config
     if (QFile::exists(Config::DSSATPRO_FILE))
         loadDssatConfig(Config::DSSAT_BASE);
-
-    // Resolve GLUE paths (QSettings → common locations → DSSATPRO DGL entry)
-    GlueRunner::resolvePaths(Config::DSSATPRO_FILE);
 }
 
 MainWindow::~MainWindow() {}
@@ -368,7 +382,7 @@ void MainWindow::setupCulTab(QWidget *tab)
     addQueueBtn->setToolTip("Select treatments and add this cultivar to the GLUE calibration queue");
     addQueueBtn->setStyleSheet(Config::ACCENT_BUTTON_STYLE);
     connect(addQueueBtn, &QPushButton::clicked, this, [this]() {
-        QModelIndex idx = m_culView->currentIndex();
+        QModelIndex idx = activeIndex(m_culView);
         if (!idx.isValid()) {
             QMessageBox::warning(this, "GLUE Queue", "Please select a cultivar row first.");
             return;
@@ -997,7 +1011,7 @@ void MainWindow::selectNewCulRow(int sourceRow)
 
 void MainWindow::onCulDelete()
 {
-    QModelIndex idx = m_culProxy->mapToSource(m_culView->currentIndex());
+    QModelIndex idx = m_culProxy->mapToSource(activeIndex(m_culView));
     if (!idx.isValid()) return;
 
     auto btn = QMessageBox::question(this, "Delete cultivar",
@@ -1009,7 +1023,7 @@ void MainWindow::onCulDelete()
 
 void MainWindow::onCulDuplicate()
 {
-    QModelIndex idx = m_culProxy->mapToSource(m_culView->currentIndex());
+    QModelIndex idx = m_culProxy->mapToSource(activeIndex(m_culView));
     if (!idx.isValid()) {
         setStatus("Select a cultivar row to duplicate.", true);
         return;
@@ -1053,7 +1067,7 @@ void MainWindow::onCulSave()
 
 void MainWindow::onCulCopyRow()
 {
-    QModelIndex idx = m_culProxy->mapToSource(m_culView->currentIndex());
+    QModelIndex idx = m_culProxy->mapToSource(activeIndex(m_culView));
     if (!idx.isValid()) return;
     const CulRow &row = m_culModel->rows().at(idx.row());
     int numParams = m_culModel->columnCount() - CulTableModel::COL_PARAM0;
@@ -1064,7 +1078,7 @@ void MainWindow::onCulCopyRow()
 
 void MainWindow::onEcoCopyRow()
 {
-    QModelIndex idx = m_ecoProxy->mapToSource(m_ecoView->currentIndex());
+    QModelIndex idx = m_ecoProxy->mapToSource(activeIndex(m_ecoView));
     if (!idx.isValid()) return;
     const EcoRow &row = m_ecoModel->rows().at(idx.row());
     QApplication::clipboard()->setText(EcoParser::formatRow(row, m_ecoModel->layout()));
@@ -1359,7 +1373,7 @@ void MainWindow::onEcoAdd()
 
 void MainWindow::onEcoDelete()
 {
-    QModelIndex idx = m_ecoProxy->mapToSource(m_ecoView->currentIndex());
+    QModelIndex idx = m_ecoProxy->mapToSource(activeIndex(m_ecoView));
     if (!idx.isValid()) return;
 
     QString ecoNum = m_ecoModel->rows()[idx.row()].ecoNum;
@@ -1379,7 +1393,7 @@ void MainWindow::onEcoDelete()
 
 void MainWindow::onEcoDuplicate()
 {
-    QModelIndex idx = m_ecoProxy->mapToSource(m_ecoView->currentIndex());
+    QModelIndex idx = m_ecoProxy->mapToSource(activeIndex(m_ecoView));
     if (!idx.isValid()) {
         setStatus("Select an ecotype row to duplicate.", true);
         return;

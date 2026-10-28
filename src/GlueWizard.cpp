@@ -22,9 +22,7 @@
 #include <QGuiApplication>
 #include <QClipboard>
 
-static const QString GLUE_DIR       = GlueRunner::GLUE_DIR;
-static const QString GLUE_WORK      = GlueRunner::GLUE_WORK;
-static const QString BACKUP_DEFAULT = GlueRunner::GLUE_WORK + "/BackUp";
+// GLUE paths are read when used: resolvePaths() sets them after static init.
 
 GlueWizard::GlueWizard(const CropInfo &cropInfo,
                        const QString &cultivarId,
@@ -129,7 +127,7 @@ void GlueWizard::setupBackupPage()
 
     QHBoxLayout *dirRow = new QHBoxLayout;
     dirRow->addWidget(new QLabel("Backup folder:"));
-    m_backupDirEdit = new QLineEdit(BACKUP_DEFAULT);
+    m_backupDirEdit = new QLineEdit(GlueRunner::GLUE_WORK + "/BackUp");
     dirRow->addWidget(m_backupDirEdit, 1);
     m_backupBrowseBtn = new QPushButton("Browse…");
     dirRow->addWidget(m_backupBrowseBtn);
@@ -151,10 +149,10 @@ void GlueWizard::setupBackupPage()
     connect(m_backupYesBtn, &QPushButton::clicked, this, [this]() {
         QString dest = m_backupDirEdit->text().trimmed();
         QDir().mkpath(dest);
-        QDirIterator it(GLUE_WORK, QDir::Files, QDirIterator::Subdirectories);
+        QDirIterator it(GlueRunner::GLUE_WORK, QDir::Files, QDirIterator::Subdirectories);
         while (it.hasNext()) {
             QString src = it.next();
-            QString rel = QDir(GLUE_WORK).relativeFilePath(src);
+            QString rel = QDir(GlueRunner::GLUE_WORK).relativeFilePath(src);
             QString dst = dest + "/" + rel;
             QDir().mkpath(QFileInfo(dst).absolutePath());
             QFile::copy(src, dst);
@@ -287,7 +285,7 @@ void GlueWizard::setupRunPage()
         // GLUE writes the calibrated cultivar line to "LU<culId> <culName>.CUL" in GLWork
         QString culFileName = QString("%1%2 %3.CUL")
             .arg(m_cropInfo.cropCode, m_cultivarId, m_cultivarName.trimmed().left(16).trimmed());
-        QString culFilePath = GLUE_WORK + "/" + culFileName;
+        QString culFilePath = GlueRunner::GLUE_WORK + "/" + culFileName;
 
         if (!QFileInfo::exists(culFilePath)) {
             QMessageBox::warning(this, "File Not Found",
@@ -339,17 +337,17 @@ void GlueWizard::setupRunPage()
     connect(m_outDevBtn, &QPushButton::clicked, this, [this]() {
         // ModelRunIndicator.txt has phenology/development summary
 #ifdef Q_OS_WIN
-        QProcess::startDetached("notepad", {GLUE_WORK + "/ModelRunIndicator.txt"});
+        QProcess::startDetached("notepad", {GlueRunner::GLUE_WORK + "/ModelRunIndicator.txt"});
 #else
-        QProcess::startDetached("open", {GLUE_WORK + "/ModelRunIndicator.txt"});
+        QProcess::startDetached("open", {GlueRunner::GLUE_WORK + "/ModelRunIndicator.txt"});
 #endif
     });
     connect(m_outYieldBtn, &QPushButton::clicked, this, [this]() {
         // EvaluateFrame_2.txt has simulated vs observed for all treatments
 #ifdef Q_OS_WIN
-        QProcess::startDetached("notepad", {GLUE_WORK + "/EvaluateFrame_2.txt"});
+        QProcess::startDetached("notepad", {GlueRunner::GLUE_WORK + "/EvaluateFrame_2.txt"});
 #else
-        QProcess::startDetached("open", {GLUE_WORK + "/EvaluateFrame_2.txt"});
+        QProcess::startDetached("open", {GlueRunner::GLUE_WORK + "/EvaluateFrame_2.txt"});
 #endif
     });
 
@@ -604,7 +602,7 @@ void GlueWizard::onPollProgress()
         "round of GLUE is finished"
     };
 
-    QString indFile = GLUE_WORK + "/ModelRunIndicator.txt";
+    QString indFile = GlueRunner::GLUE_WORK + "/ModelRunIndicator.txt";
     QFile fi(indFile);
     if (!fi.open(QIODevice::ReadOnly | QIODevice::Text)) return;
     QStringList lines = QString::fromLatin1(fi.readAll()).split('\n');

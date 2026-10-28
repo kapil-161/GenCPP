@@ -79,6 +79,8 @@ GlueQueuePanel::GlueQueuePanel(GlueQueueManager *manager, QWidget *parent)
     });
 
     connect(m_table, &QTableWidget::cellDoubleClicked, this, &GlueQueuePanel::onRowDoubleClicked);
+
+    refresh();   // initial button state: nothing running, nothing pending
 }
 
 void GlueQueuePanel::refresh()

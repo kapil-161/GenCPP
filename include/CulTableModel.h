@@ -57,6 +57,9 @@ public:
     void setCalibrationTypeForParam(const QString &paramName, const QString &type);
     QMap<QString, QString> calibrationTypes() const { return m_calibTypes; }
 
+    // Tint the row with this VAR# (strength 1 = full, 0 = none); empty varNum clears
+    void setHighlight(const QString &varNum, qreal strength);
+
     // Validation: returns a list of violations (e.g., "CAND01: PPSEN=0.5 (range: -0.2 to -0.04)")
     struct Violation {
         int row;
@@ -82,6 +85,9 @@ private:
     QStringList m_paramNames;
     QMap<QString, QString> m_tips;
     QMap<QString, QString> m_calibTypes;  // paramName -> "P" | "G" | "N"
+    QString m_highlightVar;
+    qreal   m_highlightStrength = 0;
+    void emitRowChanged(const QString &varNum);
 };
 
 #endif // CULTABLEMODEL_H

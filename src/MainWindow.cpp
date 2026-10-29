@@ -67,6 +67,7 @@ public:
 #include <QMenu>
 #include <QAbstractTextDocumentLayout>
 #include <QTimer>
+#include <QVariantAnimation>
 #include <QDebug>
 #include <QSet>
 #include <QDirIterator>
@@ -904,6 +905,7 @@ void MainWindow::onCropChanged(int index)
 void MainWindow::loadCrop(const QString &cropCode)
 {
     if (!m_crops.contains(cropCode)) return;
+    if (m_culNewRowFade) m_culNewRowFade->stop();
     const CropInfo &info = m_crops[cropCode];
     m_currentCropCode = cropCode;
     m_currentCulPath  = info.culFile;
@@ -1166,10 +1168,36 @@ void MainWindow::selectNewCulRow(int sourceRow)
     QModelIndex srcIdx = m_culModel->index(sourceRow, CulTableModel::COL_VARNUM);
     m_culProxy->keepVisible(srcIdx.data().toString());
     QModelIndex newIdx = m_culProxy->mapFromSource(srcIdx);
-    if (newIdx.isValid()) {
-        m_culView->setCurrentIndex(newIdx);
-        m_culView->scrollTo(newIdx);
+    if (!newIdx.isValid()) return;
+
+    // Make the new row current without selecting it, so the green tint isn't
+    // hidden under the selection colour; buttons act on the current row anyway.
+    m_culView->selectionModel()->setCurrentIndex(newIdx, QItemSelectionModel::Clear);
+    m_culView->scrollTo(newIdx);
+
+    const QString varNum = srcIdx.data().toString();
+    if (!m_culNewRowFade) {
+        m_culNewRowFade = new QVariantAnimation(this);
+        m_culNewRowFade->setStartValue(1.0);
+        m_culNewRowFade->setEndValue(0.0);
+        m_culNewRowFade->setDuration(3000);
+        m_culNewRowFade->setEasingCurve(QEasingCurve::InCubic);   // stays strong, then fades
     }
+    m_culNewRowFade->stop();
+    m_culNewRowFade->disconnect(this);
+    connect(m_culNewRowFade, &QVariantAnimation::valueChanged, this, [this, varNum](const QVariant &v) {
+        m_culModel->setHighlight(varNum, v.toReal());
+    });
+    connect(m_culNewRowFade, &QVariantAnimation::finished, this, [this, varNum]() {
+        m_culModel->setHighlight({}, 0);
+        // Hand over to the normal selection, unless the user has moved on
+        QModelIndex cur = m_culProxy->mapToSource(m_culView->currentIndex());
+        if (cur.isValid() && !m_culView->selectionModel()->hasSelection()
+            && m_culModel->index(cur.row(), CulTableModel::COL_VARNUM).data().toString() == varNum)
+            m_culView->selectRow(m_culView->currentIndex().row());
+    });
+    m_culModel->setHighlight(varNum, 1.0);
+    m_culNewRowFade->start();
 }
 
 void MainWindow::onCulDelete()

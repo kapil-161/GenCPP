@@ -56,6 +56,7 @@ namespace Config {
         "QPushButton:disabled { background-color: #C9D6DF; color: #6c757d; }";
     const QColor OOR_COLOR       = QColor("#FFCDD2");   // red    – out-of-range values
     const QColor ECO_REF_COLOR   = QColor("#E8F5E9");   // green  – eco reference columns
+    const QColor NEW_ROW_COLOR   = QColor("#A5D6A7");   // green  – just added/duplicated row (fades out)
 
     // Window
     const int WIN_W     = 1200;

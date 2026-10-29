@@ -48,6 +48,8 @@ void CulTableModel::setRows(const QVector<CulRow> &rows)
 {
     beginResetModel();
     m_rows = rows;
+    m_highlightVar.clear();
+    m_highlightStrength = 0;
 
     // Extract MINIMA (999991) and MAXIMA (999992) for validation
     m_minParams.clear();
@@ -143,6 +145,11 @@ QVariant CulTableModel::data(const QModelIndex &index, int role) const
     if (role == Qt::BackgroundRole) {
         if (row.isMinMax)
             return QBrush(Config::MINMAX_COLOR);
+        if (m_highlightStrength > 0 && row.varNum == m_highlightVar) {
+            const QColor c = Config::NEW_ROW_COLOR;
+            auto mix = [this](int v) { return int(255 + (v - 255) * m_highlightStrength); };
+            return QBrush(QColor(mix(c.red()), mix(c.green()), mix(c.blue())));
+        }
         if (col >= COL_PARAM0) {
             int p = col - COL_PARAM0;
             if (p < row.params.size() && row.params[p].has_value() && isOutOfRange(p, row.params[p].value()))
@@ -374,6 +381,26 @@ void CulTableModel::duplicateRow(int row)
     m_rows.append(r);
     endInsertRows();
     emit dataModified();
+}
+
+void CulTableModel::setHighlight(const QString &varNum, qreal strength)
+{
+    const QString previous = m_highlightVar;
+    m_highlightVar = varNum;
+    m_highlightStrength = varNum.isEmpty() ? 0 : strength;
+    if (!previous.isEmpty() && previous != varNum)
+        emitRowChanged(previous);
+    if (!varNum.isEmpty())
+        emitRowChanged(varNum);
+}
+
+void CulTableModel::emitRowChanged(const QString &varNum)
+{
+    for (int r = 0; r < m_rows.size(); ++r)
+        if (m_rows[r].varNum == varNum) {
+            emit dataChanged(index(r, 0), index(r, columnCount() - 1), {Qt::BackgroundRole});
+            return;
+        }
 }
 
 void CulTableModel::deleteRow(int row)

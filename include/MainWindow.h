@@ -117,6 +117,7 @@ private:
     QTableView *m_culView;
     CulTableModel *m_culModel;
     class CulSortProxy *m_culProxy = nullptr;
+    class QVariantAnimation *m_culNewRowFade = nullptr;
     QPushButton *m_culAddBtn, *m_culDelBtn, *m_culDupBtn;
     QPushButton *m_culRefreshBtn;
     QLabel      *m_culSaveState = nullptr;     // Saved / Saving / Not saved

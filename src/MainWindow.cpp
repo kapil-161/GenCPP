@@ -415,6 +415,41 @@ static QPushButton *makeBtn(const QString &text, const QString &objName = {})
     return btn;
 }
 
+// The stylesheet's min-width becomes the button's minimum size, which lets a
+// crowded toolbar squeeze a button narrower than its label. Pin the minimum to
+// the bold label plus the stylesheet's 12px side padding and 1px border, and
+// re-pin it whenever the stylesheet is re-applied (that resets the minimum).
+static void applyFullLabelWidth(QPushButton *btn)
+{
+    QFont bold = btn->font();
+    bold.setBold(true);
+    const int labelW = QFontMetrics(bold).horizontalAdvance(btn->text()) + 2 * 12 + 2 + 6;
+    btn->setMinimumWidth(qMax(btn->sizeHint().width(), labelW));
+}
+
+namespace {
+class FullLabelFilter : public QObject
+{
+public:
+    using QObject::QObject;
+    bool eventFilter(QObject *obj, QEvent *ev) override
+    {
+        if (ev->type() == QEvent::Polish || ev->type() == QEvent::StyleChange)
+            applyFullLabelWidth(static_cast<QPushButton *>(obj));
+        return false;
+    }
+};
+}
+
+static void keepFullLabel(QPushButton *btn)
+{
+    if (!btn->property("fullLabel").toBool()) {
+        btn->setProperty("fullLabel", true);
+        btn->installEventFilter(new FullLabelFilter(btn));
+    }
+    applyFullLabelWidth(btn);
+}
+
 void MainWindow::setupCulTab(QWidget *tab)
 {
     m_glueQueue = new GlueQueueManager(this);
@@ -428,7 +463,8 @@ void MainWindow::setupCulTab(QWidget *tab)
     m_culSearch = new QLineEdit;
     m_culSearch->setPlaceholderText("Filter by VAR# or VRNAME…");
     m_culSearch->setMaximumWidth(260);
-    m_culSearch->setMinimumWidth(170);   // toolbar is crowded: keep the filter usable
+    // Toolbar is crowded: the search box gives way first so buttons keep their full labels
+    m_culSearch->setMinimumWidth(90);
     toolbar->addWidget(m_culSearch);
     toolbar->addStretch();
 
@@ -470,7 +506,8 @@ void MainWindow::setupCulTab(QWidget *tab)
         GlueQueueDialog dlg(m_crops[m_currentCropCode], varNum, vrName, this);
         if (dlg.exec() == QDialog::Accepted) {
             m_glueQueue->addEntry(dlg.result());
-            m_culGlueQueueBtn->setText("Add to GLUE Queue");
+            m_culGlueQueueBtn->setText("Queue GLUE");   // short: a 1200px window has no spare toolbar width
+            keepFullLabel(m_culGlueQueueBtn);
         }
     });
 
@@ -479,15 +516,17 @@ void MainWindow::setupCulTab(QWidget *tab)
     // Groups: rows | file | GLUE | save state
     for (QPushButton *b : {m_culAddBtn, m_culDupBtn, m_culDelBtn})
         toolbar->addWidget(b);
-    toolbar->addSpacing(16);
+    toolbar->addSpacing(8);
     toolbar->addWidget(m_culRefreshBtn);
-    toolbar->addSpacing(16);
+    toolbar->addSpacing(8);
     toolbar->addWidget(culGlueBtn);
     toolbar->addWidget(addQueueBtn);
-    toolbar->addSpacing(16);
+    toolbar->addSpacing(8);
     toolbar->addWidget(m_culSaveState);
 
     vbox->addLayout(toolbar);
+    for (QPushButton *b : {m_culAddBtn, m_culDupBtn, m_culDelBtn, m_culRefreshBtn, culGlueBtn, addQueueBtn})
+        keepFullLabel(b);
 
     // Table view with sort/filter proxy
     m_culProxy = new CulSortProxy(this);
@@ -531,8 +570,12 @@ void MainWindow::setupCulTab(QWidget *tab)
     });
 
     // "13 of 116 cultivars" next to the filter checkbox
-    for (auto sig : {&QAbstractItemModel::rowsInserted, &QAbstractItemModel::rowsRemoved})
+    // The proxy reports a removal before the source row is gone, so also recount
+    // once the source model has actually changed.
+    for (auto sig : {&QAbstractItemModel::rowsInserted, &QAbstractItemModel::rowsRemoved}) {
         connect(m_culProxy, sig, this, &MainWindow::updateCulCount);
+        connect(m_culModel, sig, this, &MainWindow::updateCulCount);
+    }
     connect(m_culProxy, &QAbstractItemModel::modelReset,    this, &MainWindow::updateCulCount);
     connect(m_culProxy, &QAbstractItemModel::layoutChanged, this, &MainWindow::updateCulCount);
 
@@ -878,6 +921,7 @@ void MainWindow::loadCrop(const QString &cropCode)
     const QString glueBlock = glueUnsupportedReason(cropCode);
     if (m_culGlueQueueBtn) {
         m_culGlueQueueBtn->setText("Run GLUE");
+        keepFullLabel(m_culGlueQueueBtn);
         m_culGlueQueueBtn->setEnabled(glueBlock.isEmpty());
         m_culGlueQueueBtn->setToolTip(glueBlock.isEmpty()
             ? "Select treatments and add this cultivar to the GLUE calibration queue"
@@ -1659,6 +1703,15 @@ void MainWindow::onSpeSectionClicked(const QString &section)
     // Scroll so the section header appears near the top of the viewport (8px margin)
     QRectF blockRect = doc->documentLayout()->blockBoundingRect(block);
     m_speEdit->verticalScrollBar()->setValue(qMax(0, (int)blockRect.top() - 8));
+
+    // The scroll handler reads the line in the 8px margin, which belongs to the
+    // previous section; keep the clicked section selected.
+    const auto items = m_speNavList->findItems(section, Qt::MatchExactly);
+    if (!items.isEmpty()) {
+        m_speNavList->blockSignals(true);
+        m_speNavList->setCurrentItem(items.first());
+        m_speNavList->blockSignals(false);
+    }
 }
 
 void MainWindow::onSpeScrolled(int /*value*/)

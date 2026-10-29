@@ -13,8 +13,9 @@ QString BackupManager::createBackup(const QString &filePath)
 
     QFileInfo fi(filePath);
     QString timestamp = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss");
+    // Keep the extension so a crop's CUL, ECO and SPE files get separate backups
     QString backupPath = fi.dir().filePath(
-        fi.completeBaseName() + "." + timestamp + ".bak"
+        fi.fileName() + "." + timestamp + ".bak"
     );
 
     if (QFile::copy(filePath, backupPath))
@@ -27,10 +28,7 @@ void BackupManager::pruneBackups(const QString &filePath, int maxKeep)
 {
     QFileInfo fi(filePath);
     QDir dir = fi.dir();
-    QString base = fi.completeBaseName();
-
-    // Find all .bak files matching this base
-    QStringList filter = { base + ".*.bak" };
+    QStringList filter = { fi.fileName() + ".*.bak" };
     QStringList backups = dir.entryList(filter, QDir::Files, QDir::Name);
 
     // Delete oldest entries if we exceed maxKeep

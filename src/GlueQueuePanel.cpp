@@ -153,14 +153,35 @@ void GlueQueuePanel::onStop()
 {
     if (!m_manager->isRunning()) return;
     QString name;
-    for (const auto &e : m_manager->entries())
-        if (e.status == GlueQueueStatus::Running) name = e.cultivarId + " " + e.cultivarName;
+    int runningIndex = -1;
+    const auto &entries = m_manager->entries();
+    for (int i = 0; i < entries.size(); ++i)
+        if (entries[i].status == GlueQueueStatus::Running) {
+            runningIndex = i;
+            name = entries[i].cultivarId + " " + entries[i].cultivarName;
+        }
+    if (runningIndex < 0) return;
     const bool pending = m_manager->hasPending();
-    if (QMessageBox::question(this, "Stop GLUE",
-            QString("Stop the GLUE calibration for %1?\n\nIts results so far will be lost.%2")
-                .arg(name.trimmed(),
-                     pending ? "\nPending entries stay in the queue (use Resume Queue to run them)." : ""),
-            QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
+
+    QMessageBox box(QMessageBox::Question, "Stop GLUE",
+        QString("Stop the GLUE calibration for %1?\n\nIts results so far will be lost.%2")
+            .arg(name.trimmed(),
+                 pending ? "\nPending entries stay in the queue (use Resume Queue to run them)." : ""),
+        QMessageBox::Yes | QMessageBox::No, this);
+    box.setDefaultButton(QMessageBox::No);
+    // The run keeps going while the user decides; if it ends first the question is moot.
+    auto conn = connect(m_manager, &GlueQueueManager::entryFinished, &box,
+                        [&box, runningIndex](int index, bool, const QString &) {
+                            if (index == runningIndex) box.reject();
+                        });
+    const int answer = box.exec();
+    disconnect(conn);
+    if (answer != QMessageBox::Yes) return;
+
+    // Never stop a different entry that started after this one finished
+    const auto &now = m_manager->entries();
+    if (!m_manager->isRunning() || runningIndex >= now.size()
+        || now[runningIndex].status != GlueQueueStatus::Running)
         return;
     m_manager->stop();
 }

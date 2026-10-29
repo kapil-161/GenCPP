@@ -4,3 +4,4 @@ build_dbg/
 build_win/
 .cmake/
 *.log
+build_macos/

@@ -3,8 +3,8 @@
 #include <QFileInfo>
 #include <QDir>
 #include <QDateTime>
+#include <QRegularExpression>
 #include <QStringList>
-#include <algorithm>
 
 QString BackupManager::createBackup(const QString &filePath)
 {
@@ -12,28 +12,26 @@ QString BackupManager::createBackup(const QString &filePath)
         return QString();
 
     QFileInfo fi(filePath);
-    QString timestamp = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss");
-    // Keep the extension so a crop's CUL, ECO and SPE files get separate backups
-    QString backupPath = fi.dir().filePath(
-        fi.fileName() + "." + timestamp + ".bak"
-    );
-
-    if (QFile::copy(filePath, backupPath))
-        return backupPath;
-
-    return QString();
-}
-
-void BackupManager::pruneBackups(const QString &filePath, int maxKeep)
-{
-    QFileInfo fi(filePath);
     QDir dir = fi.dir();
-    QStringList filter = { fi.fileName() + ".*.bak" };
-    QStringList backups = dir.entryList(filter, QDir::Files, QDir::Name);
+    const QString timestamp = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss");
+    const QString backupName = fi.fileName() + "." + timestamp + ".bak";
+    const QString backupPath = dir.filePath(backupName);
 
-    // Delete oldest entries if we exceed maxKeep
-    while (backups.size() > maxKeep) {
-        QFile::remove(dir.filePath(backups.first()));
-        backups.removeFirst();
+    // A second save within the same second keeps that second's backup
+    if (!QFile::exists(backupPath) && !QFile::copy(filePath, backupPath))
+        return QString();
+
+    // The folder keeps one backup per file type (CUL, ECO, SPE), whichever crop
+    // it came from. Also clear the old "<name>.<timestamp>.bak" style, whose
+    // type can't be told from its name.
+    const QRegularExpression sameType(
+        "^.+\\." + QRegularExpression::escape(fi.suffix()) + "\\.\\d{8}_\\d{6}\\.bak$",
+        QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression legacy("^[^.]+\\.\\d{8}_\\d{6}\\.bak$");
+    for (const QString &name : dir.entryList({"*.bak"}, QDir::Files)) {
+        if (name == backupName) continue;
+        if (sameType.match(name).hasMatch() || legacy.match(name).hasMatch())
+            QFile::remove(dir.filePath(name));
     }
+    return backupPath;
 }

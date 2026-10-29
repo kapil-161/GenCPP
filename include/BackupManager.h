@@ -6,12 +6,10 @@
 class BackupManager
 {
 public:
-    // Create a timestamped backup of filePath next to the original file.
+    // Create a timestamped backup of filePath next to the original file and
+    // remove the folder's other backups of the same file type (CUL/ECO/SPE).
     // Returns the backup path, or empty string on failure.
     static QString createBackup(const QString &filePath);
-
-    // Remove oldest backup files, keeping only maxKeep.
-    static void pruneBackups(const QString &filePath, int maxKeep = 1);
 };
 
 #endif // BACKUPMANAGER_H

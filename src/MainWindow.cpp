@@ -1207,7 +1207,6 @@ void MainWindow::onCulSave()
 
     // Backup
     BackupManager::createBackup(m_currentCulPath);
-    BackupManager::pruneBackups(m_currentCulPath);
 
     QStringList paramNames;
     int numParams = m_culModel->columnCount() - CulTableModel::COL_PARAM0;
@@ -1594,7 +1593,6 @@ void MainWindow::onEcoSave()
 {
     if (m_currentEcoPath.isEmpty()) return;
     BackupManager::createBackup(m_currentEcoPath);
-    BackupManager::pruneBackups(m_currentEcoPath);
     if (EcoParser::write(m_currentEcoPath, m_ecoModel->rows(), m_ecoHeaderLines,
                          m_ecoModel->layout(), m_ecoFooterLines)) {
         m_ecoDirty = false;
@@ -1648,7 +1646,6 @@ void MainWindow::onSpeSave()
 {
     if (m_currentSpePath.isEmpty()) return;
     BackupManager::createBackup(m_currentSpePath);
-    BackupManager::pruneBackups(m_currentSpePath);
     if (SpeEditor::save(m_currentSpePath, m_speEdit->toPlainText())) {
         m_speDirty = false;
         setStatus("SPE saved: " + m_currentSpePath);

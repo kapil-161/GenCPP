@@ -177,9 +177,11 @@ void EcoTableModel::duplicateRow(int row)
     r.isMinMax = false;
     r.preComment.clear();
     r.trailingBlanks = 0;
-    QStringList ids;
-    for (const auto &x : m_rows) ids << x.ecoNum;
+    QStringList ids, names;
+    for (const auto &x : m_rows) { ids << x.ecoNum; names << x.ecoName; }
     r.ecoNum   = CulParser::nextFreeId(r.ecoNum, ids);   // must stay 6 chars (A6)
+    if (!r.ecoName.isEmpty())   // files without an ECONAME column keep it empty
+        r.ecoName = CulParser::copyName(r.ecoName, names);
     m_rows.append(r);
     endInsertRows();
     emit dataModified();

@@ -333,6 +333,22 @@ bool CulParser::writeLines(const QString &filePath, const QStringList &lines)
     return file.write(bytes) == bytes.size();
 }
 
+QString CulParser::copyName(const QString &name, const QStringList &existing)
+{
+    // Copying a copy gives "X COPY2", not "X COPY COPY"
+    static const QRegularExpression copySuffix("\\s+COPY\\d*$", QRegularExpression::CaseInsensitiveOption);
+    QString base = name.trimmed();
+    base.remove(copySuffix);
+
+    for (int n = 1; ; ++n) {
+        const QString suffix = n == 1 ? " COPY" : " COPY" + QString::number(n);
+        const QString head = base.left(16 - suffix.size()).trimmed();
+        const QString candidate = head.isEmpty() ? suffix.trimmed() : head + suffix;
+        if (!existing.contains(candidate, Qt::CaseInsensitive))
+            return candidate;
+    }
+}
+
 QString CulParser::nextFreeId(const QString &srcId, const QStringList &existing)
 {
     // Letter prefix = leading non-digits; keep at least 2 digits of room in 6 chars

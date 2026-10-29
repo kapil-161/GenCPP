@@ -375,9 +375,10 @@ void CulTableModel::duplicateRow(int row)
     r.isMinMax = false;
     r.preComment.clear();      // history comments belong to the original row
     r.trailingBlanks = 0;
-    QStringList ids;
-    for (const auto &x : m_rows) ids << x.varNum;
+    QStringList ids, names;
+    for (const auto &x : m_rows) { ids << x.varNum; names << x.vrName; }
     r.varNum   = CulParser::nextFreeId(r.varNum, ids);   // must stay 6 chars (A6)
+    r.vrName   = CulParser::copyName(r.vrName, names);
     m_rows.append(r);
     endInsertRows();
     emit dataModified();

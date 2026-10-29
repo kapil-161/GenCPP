@@ -73,6 +73,10 @@ public:
     // incrementing its number (IB0488 -> IB1501 if IB1500 is the highest IB id).
     static QString nextFreeId(const QString &srcId, const QStringList &existing);
 
+    // Name for a duplicated row: "<name> COPY", then "COPY2", "COPY3"... if taken,
+    // shortening the name so the result fits the 16-char A16 field.
+    static QString copyName(const QString &name, const QStringList &existing);
+
     // Parse a single CUL data line (e.g. pasted from GLUE output).
     // Returns a row with varNum.isEmpty() == true on failure.
     static CulRow parseLine(const QString &line);

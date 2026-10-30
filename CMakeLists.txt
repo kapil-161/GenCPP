@@ -91,6 +91,7 @@ set(SOURCES
     src/SpeGraphWidget.cpp
     src/SpeGraphBuilder.cpp
     src/FrozenTableView.cpp
+    src/CalibHeaderView.cpp
     src/GlueWizard.cpp
     src/GlueRunner.cpp
     src/GlueQueueManager.cpp
@@ -117,6 +118,7 @@ set(HEADERS
     include/SpeGraphWidget.h
     include/SpeGraphBuilder.h
     include/FrozenTableView.h
+    include/CalibHeaderView.h
     include/GlueWizard.h
     include/GlueRunner.h
     include/GlueQueueManager.h

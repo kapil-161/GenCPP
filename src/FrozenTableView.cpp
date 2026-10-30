@@ -1,12 +1,23 @@
 #include "FrozenTableView.h"
+#include "CalibHeaderView.h"
 #include <QHeaderView>
 #include <QScrollBar>
 
-FrozenTableView::FrozenTableView(int frozenColumns, QWidget *parent)
+FrozenTableView::FrozenTableView(int frozenColumns, bool calibrationBand, QWidget *parent)
     : QTableView(parent)
     , m_frozen(new QTableView(this))
     , m_count(frozenColumns)
 {
+    // Before any connection below is made to the headers
+    if (calibrationBand) {
+        for (QTableView *v : {static_cast<QTableView *>(this), m_frozen}) {
+            auto *h = new CalibHeaderView(v);
+            v->setHorizontalHeader(h);
+            connect(h, &CalibHeaderView::calibrationClicked, this, &FrozenTableView::calibrationClicked);
+        }
+        m_frozen->raise();   // the new main header was stacked above the frozen overlay
+    }
+
     m_frozen->setFocusPolicy(Qt::NoFocus);
     m_frozen->verticalHeader()->hide();
     m_frozen->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);

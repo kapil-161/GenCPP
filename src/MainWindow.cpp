@@ -596,8 +596,10 @@ void MainWindow::setupCulTab(QWidget *tab)
     m_culProxy->setFilterKeyColumn(-1);
     m_culProxy->setFilterCaseSensitivity(Qt::CaseInsensitive);
 
-    auto *culView = new FrozenTableView(4);   // VAR#, VRNAME, EXPNO, ECO# stay while parameters scroll
+    // VAR#, VRNAME, EXPNO, ECO# stay while parameters scroll; P/G/N band under the names
+    auto *culView = new FrozenTableView(4, true);
     m_culView = culView;
+    connect(culView, &FrozenTableView::calibrationClicked, this, &MainWindow::showCalibrationMenu);
     m_culView->setModel(m_culProxy);
     culView->setColumnDelegate(CulTableModel::COL_ECONUM, new EcoComboDelegate([this]() {
         EcoComboDelegate::EcoList list;
@@ -631,7 +633,7 @@ void MainWindow::setupCulTab(QWidget *tab)
     vbox->addWidget(makeLegend({{Config::MINMAX_COLOR, "MINIMA / MAXIMA"},
                                 {Config::OOR_COLOR,    "Outside MINIMA–MAXIMA"}},
         "<b style='color:#1565C0'>[P]</b> phenology &nbsp;<b style='color:#2E7D32'>[G]</b> growth"
-        " &nbsp;<b style='color:#9E9E9E'>[N]</b> not calibrated &nbsp;(right-click a column header to change)"));
+        " &nbsp;<b style='color:#9E9E9E'>[N]</b> not calibrated &nbsp;(click P/G/N under a column name to change)"));
 
     // Queue panel only takes room once something is queued
     m_gluePanel->setVisible(false);
@@ -1969,7 +1971,12 @@ void MainWindow::setStatus(const QString &msg, bool error)
 
 void MainWindow::onCulHeaderContextMenu(const QPoint &pos)
 {
-    int col = m_culView->horizontalHeader()->logicalIndexAt(pos);
+    showCalibrationMenu(m_culView->horizontalHeader()->logicalIndexAt(pos),
+                        m_culView->horizontalHeader()->mapToGlobal(pos));
+}
+
+void MainWindow::showCalibrationMenu(int col, const QPoint &globalPos)
+{
     if (col < CulTableModel::COL_PARAM0) return;
 
     QString paramName = m_culModel->columnName(col);
@@ -1986,7 +1993,7 @@ void MainWindow::onCulHeaderContextMenu(const QPoint &pos)
     gAct->setCheckable(true); gAct->setChecked(current == "G");
     nAct->setCheckable(true); nAct->setChecked(current == "N");
 
-    QAction *chosen = menu.exec(m_culView->horizontalHeader()->mapToGlobal(pos));
+    QAction *chosen = menu.exec(globalPos);
     if (!chosen) return;
 
     QString newType;
@@ -1999,7 +2006,9 @@ void MainWindow::onCulHeaderContextMenu(const QPoint &pos)
     m_culModel->setCalibrationTypeForParam(paramName, newType);
     updateCalibrationHeaderLine();
     m_culDirty = true;
-    setStatus(QString("Calibration type for %1 set to %2 — click Save to write to file.").arg(paramName, newType));
+    m_autoSaveTimer->start();
+    updateSaveIndicators();
+    setStatus(QString("Calibration type for %1 set to %2.").arg(paramName, newType));
 }
 
 void MainWindow::updateCalibrationHeaderLine()
@@ -2009,9 +2018,36 @@ void MainWindow::updateCalibrationHeaderLine()
 
     const QMap<QString, QString> &types = m_culModel->calibrationTypes();
 
+    // Each letter under the last character of its column name in the "@VAR#"
+    // line, as DSSAT's own files do. GLUE only splits the line on spaces.
+    int headerIdx = -1;
+    for (int i = 0; i < m_culHeaderLines.size(); ++i)
+        if (m_culHeaderLines[i].startsWith("@VAR")) { headerIdx = i; break; }
+
     QString calLine = "!Calibration";
-    for (const QString &name : paramNames)
-        calLine += "  " + types.value(name, "N");
+    QVector<int> ends;
+    if (headerIdx >= 0) {
+        static const QRegularExpression tok("\\S+");
+        auto it = tok.globalMatch(m_culHeaderLines[headerIdx]);
+        QStringList names;
+        while (it.hasNext()) {
+            const auto m = it.next();
+            names << m.captured();
+            ends << m.capturedEnd() - 1;
+        }
+        // @VAR#, VRNAME..., EXPNO, ECO# come before the parameters
+        if (names.size() >= 4 + paramNames.size() && names.mid(4, paramNames.size()) == paramNames)
+            ends = ends.mid(4, paramNames.size());
+        else
+            ends.clear();
+    }
+    for (int k = 0; k < paramNames.size(); ++k) {
+        const QString t = types.value(paramNames[k], "N");
+        if (!ends.isEmpty() && ends[k] > calLine.size())
+            calLine = calLine.leftJustified(ends[k], ' ') + t;
+        else
+            calLine += "  " + t;
+    }
 
     static const QRegularExpression calRe("^!\\s*[Cc]alibration\\b");
     bool found = false;
@@ -2022,12 +2058,6 @@ void MainWindow::updateCalibrationHeaderLine()
             break;
         }
     }
-    if (!found) {
-        for (int i = 0; i < m_culHeaderLines.size(); ++i) {
-            if (m_culHeaderLines[i].startsWith('@')) {
-                m_culHeaderLines.insert(i, calLine);
-                break;
-            }
-        }
-    }
+    if (!found && headerIdx >= 0)   // right under "@VAR#", where DSSAT's files have it
+        m_culHeaderLines.insert(headerIdx + 1, calLine);
 }

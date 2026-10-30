@@ -1,4 +1,5 @@
 #include "CulTableModel.h"
+#include "CalibHeaderView.h"
 #include "Config.h"
 #include <QColor>
 #include <QFont>
@@ -253,13 +254,14 @@ QVariant CulTableModel::headerData(int section, Qt::Orientation orientation, int
 
     const QString name = columnName(section);
 
-    if (role == Qt::DisplayRole) {
-        if (section >= COL_PARAM0) {
-            const QString cal = m_calibTypes.value(name);
-            if (!cal.isEmpty())
-                return name + "\n[" + cal + "]";
-        }
+    if (role == Qt::DisplayRole)
         return name;
+
+    // The header's band row, like the file's "!Calibration" line under "@VAR#"
+    if (role == CalibHeaderView::CalibRole) {
+        if (section >= COL_PARAM0) return m_calibTypes.value(name);
+        if (section == COL_VRNAME) return QStringLiteral("Calibration");
+        return QVariant();
     }
 
     if (role == Qt::ForegroundRole && section >= COL_PARAM0) {

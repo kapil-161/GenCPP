@@ -11,12 +11,17 @@ class FrozenTableView : public QTableView
     Q_OBJECT
 
 public:
-    explicit FrozenTableView(int frozenColumns, QWidget *parent = nullptr);
+    // calibrationBand: headers get a P/G/N band (CalibHeaderView) under the names
+    explicit FrozenTableView(int frozenColumns, bool calibrationBand = false, QWidget *parent = nullptr);
 
     void setModel(QAbstractItemModel *model) override;
     void setSelectionModel(QItemSelectionModel *selectionModel) override;
     // Like setItemDelegateForColumn, but also for the frozen view's copy of the column
     void setColumnDelegate(int column, QAbstractItemDelegate *delegate);
+
+signals:
+    // A click in the calibration band of a parameter column (either header)
+    void calibrationClicked(int column, const QPoint &globalPos);
 
 protected:
     void resizeEvent(QResizeEvent *event) override;

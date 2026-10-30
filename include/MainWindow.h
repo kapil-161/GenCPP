@@ -61,6 +61,7 @@ private slots:
     void onCulPasteGlue();
     void onCulCopyRow();
     void onCulHeaderContextMenu(const QPoint &pos);
+    void showCalibrationMenu(int col, const QPoint &globalPos);
 
     // ECO tab buttons
     void onEcoAdd();

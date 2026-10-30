@@ -1229,6 +1229,7 @@ void MainWindow::onCulAdd()
             const QString rangeErr = m_culModel->rangeError(i, v);
             if (!rangeErr.isEmpty()) {
                 errLabel->setText(rangeErr);
+                dialog.adjustSize();   // grow to show the wrapped message, not clip it
                 return;
             }
             params[i] = v;

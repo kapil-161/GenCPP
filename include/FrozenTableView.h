@@ -15,6 +15,8 @@ public:
 
     void setModel(QAbstractItemModel *model) override;
     void setSelectionModel(QItemSelectionModel *selectionModel) override;
+    // Like setItemDelegateForColumn, but also for the frozen view's copy of the column
+    void setColumnDelegate(int column, QAbstractItemDelegate *delegate);
 
 protected:
     void resizeEvent(QResizeEvent *event) override;

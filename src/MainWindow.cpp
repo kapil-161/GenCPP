@@ -74,7 +74,67 @@ public:
 #include <QRegularExpression>
 #include <algorithm>
 #include <memory>
+#include <functional>
 #include <QRegularExpression>
+#include <QStyledItemDelegate>
+
+// ─── ECO# editor: pick one of the crop's ecotypes ───────────────────────────
+namespace {
+class EcoComboDelegate : public QStyledItemDelegate
+{
+public:
+    using EcoList = QVector<QPair<QString, QString>>;   // ECO#, ECONAME
+    EcoComboDelegate(std::function<EcoList()> ecotypes, QObject *parent)
+        : QStyledItemDelegate(parent), m_ecotypes(std::move(ecotypes)) {}
+
+    QWidget *createEditor(QWidget *parent, const QStyleOptionViewItem &opt,
+                          const QModelIndex &index) const override
+    {
+        const EcoList list = m_ecotypes();
+        if (list.isEmpty())   // no ECO file: type the code as before
+            return QStyledItemDelegate::createEditor(parent, opt, index);
+        auto *combo = new QComboBox(parent);
+        for (const auto &e : list)
+            combo->addItem(e.second.isEmpty() ? e.first : e.first + "  " + e.second, e.first);
+        // A wide list is easier to read than one clipped to the column width
+        combo->view()->setMinimumWidth(combo->view()->sizeHintForColumn(0) + 24);
+        // Picking from the list is the whole edit: save and close at once
+        auto *self = const_cast<EcoComboDelegate *>(this);
+        connect(combo, QOverload<int>::of(&QComboBox::activated), self, [self, combo]() {
+            emit self->commitData(combo);
+            emit self->closeEditor(combo);
+        });
+        QTimer::singleShot(0, combo, [combo]() { combo->showPopup(); });
+        return combo;
+    }
+
+    void setEditorData(QWidget *editor, const QModelIndex &index) const override
+    {
+        auto *combo = qobject_cast<QComboBox *>(editor);
+        if (!combo) return QStyledItemDelegate::setEditorData(editor, index);
+        const QString cur = index.data(Qt::EditRole).toString().trimmed();
+        int i = combo->findData(cur, Qt::UserRole, Qt::MatchFixedString);
+        if (i < 0 && !cur.isEmpty()) {   // keep a code that isn't in the ECO file visible, not silently replaced
+            combo->insertItem(0, cur + "  (not in ECO file)", cur);
+            i = 0;
+        }
+        combo->setCurrentIndex(qMax(i, 0));
+    }
+
+    void setModelData(QWidget *editor, QAbstractItemModel *model,
+                      const QModelIndex &index) const override
+    {
+        auto *combo = qobject_cast<QComboBox *>(editor);
+        if (!combo) return QStyledItemDelegate::setModelData(editor, model, index);
+        const QString picked = combo->currentData().toString();
+        if (picked != index.data(Qt::EditRole).toString().trimmed())
+            model->setData(index, picked);
+    }
+
+private:
+    std::function<EcoList()> m_ecotypes;
+};
+}
 
 // ─── Proxy: pins MINIMA/MAXIMA rows to the top during any sort ───────────────
 class CulSortProxy : public QSortFilterProxyModel {
@@ -535,8 +595,16 @@ void MainWindow::setupCulTab(QWidget *tab)
     m_culProxy->setFilterKeyColumn(-1);
     m_culProxy->setFilterCaseSensitivity(Qt::CaseInsensitive);
 
-    m_culView = new FrozenTableView(4);   // VAR#, VRNAME, EXPNO, ECO# stay while parameters scroll
+    auto *culView = new FrozenTableView(4);   // VAR#, VRNAME, EXPNO, ECO# stay while parameters scroll
+    m_culView = culView;
     m_culView->setModel(m_culProxy);
+    culView->setColumnDelegate(CulTableModel::COL_ECONUM, new EcoComboDelegate([this]() {
+        EcoComboDelegate::EcoList list;
+        for (const EcoRow &r : m_ecoModel->rows())
+            if (!r.isMinMax && !r.ecoNum.trimmed().isEmpty())
+                list.append({r.ecoNum.trimmed(), r.ecoName.trimmed()});
+        return list;
+    }, this));
     m_culView->setAlternatingRowColors(true);
     m_culView->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
     m_culView->horizontalHeader()->setStretchLastSection(false);
@@ -579,6 +647,14 @@ void MainWindow::setupCulTab(QWidget *tab)
     }
     connect(m_culProxy, &QAbstractItemModel::modelReset,    this, &MainWindow::updateCulCount);
     connect(m_culProxy, &QAbstractItemModel::layoutChanged, this, &MainWindow::updateCulCount);
+
+    // Refused edits revert silently in the table, so say why — after the editor closes
+    connect(m_culModel, &CulTableModel::valueRejected, this, [this](const QString &reason) {
+        setStatus(reason, true);
+        QTimer::singleShot(0, this, [this, reason]() {
+            QMessageBox::warning(this, "Value not allowed", reason);
+        });
+    });
 
     // Auto-apply calibrated results to CUL model
     connect(m_glueQueue, &GlueQueueManager::entryFinished,
@@ -1118,11 +1194,17 @@ void MainWindow::onCulAdd()
         QDialog dialog(this);
         dialog.setWindowTitle("New Cultivar Parameters");
         QVBoxLayout *layout = new QVBoxLayout(&dialog);
-        layout->addWidget(new QLabel(QString("Enter %1 (number, max %2 chars):").arg(paramName).arg(maxLen)));
+        double lo = 0, hi = 0;
+        const bool ranged = m_culModel->allowedRange(i, &lo, &hi);
+        layout->addWidget(new QLabel(ranged
+            ? QString("Enter %1 (number, max %2 chars, from %3 to %4):")
+                  .arg(paramName).arg(maxLen).arg(lo, 0, 'g', 6).arg(hi, 0, 'g', 6)
+            : QString("Enter %1 (number, max %2 chars):").arg(paramName).arg(maxLen)));
         QLineEdit *lineEdit = new QLineEdit();
         layout->addWidget(lineEdit);
         QLabel *errLabel = new QLabel;
         errLabel->setStyleSheet("color: #c0392b;");
+        errLabel->setWordWrap(true);
         layout->addWidget(errLabel);
 
         QHBoxLayout *buttonLayout = new QHBoxLayout();
@@ -1142,6 +1224,11 @@ void MainWindow::onCulAdd()
             const double v = t.toDouble(&num);
             if (!num || t.size() > maxLen) {
                 errLabel->setText(QString("Enter a number of at most %1 characters.").arg(maxLen));
+                return;
+            }
+            const QString rangeErr = m_culModel->rangeError(i, v);
+            if (!rangeErr.isEmpty()) {
+                errLabel->setText(rangeErr);
                 return;
             }
             params[i] = v;

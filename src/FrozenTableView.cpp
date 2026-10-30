@@ -63,6 +63,12 @@ void FrozenTableView::setSelectionModel(QItemSelectionModel *selectionModel)
     m_frozen->setSelectionModel(selectionModel);
 }
 
+void FrozenTableView::setColumnDelegate(int column, QAbstractItemDelegate *delegate)
+{
+    setItemDelegateForColumn(column, delegate);
+    m_frozen->setItemDelegateForColumn(column, delegate);
+}
+
 void FrozenTableView::syncColumns()
 {
     if (!model()) return;

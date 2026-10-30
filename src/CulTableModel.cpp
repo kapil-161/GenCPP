@@ -86,6 +86,29 @@ QString CulTableModel::columnName(int col) const
     return QString();
 }
 
+bool CulTableModel::allowedRange(int paramIdx, double *lo, double *hi) const
+{
+    if (paramIdx < 0 || paramIdx >= m_minParams.size() || paramIdx >= m_maxParams.size()) return false;
+    if (!m_minParams[paramIdx].has_value() || !m_maxParams[paramIdx].has_value()) return false;
+    const double mn = m_minParams[paramIdx].value(), mx = m_maxParams[paramIdx].value();
+    if (mx < mn) return false;   // malformed MINIMA/MAXIMA: don't block anything
+    const double margin = 0.1 * (mx - mn);
+    *lo = mn - margin;
+    *hi = mx + margin;
+    return true;
+}
+
+QString CulTableModel::rangeError(int paramIdx, double value) const
+{
+    if (value == -99.0) return {};   // DSSAT missing value
+    double lo, hi;
+    if (!allowedRange(paramIdx, &lo, &hi) || (value >= lo && value <= hi)) return {};
+    const QString name = paramIdx < m_paramNames.size() ? m_paramNames[paramIdx] : QString();
+    return QString("%1 = %2 is outside the allowed range %3 to %4 "
+                   "(MINIMA–MAXIMA plus 10% of that range on each side).")
+        .arg(name).arg(value).arg(lo, 0, 'g', 6).arg(hi, 0, 'g', 6);
+}
+
 bool CulTableModel::isOutOfRange(int paramIdx, double value) const
 {
     if (value == -99.0) return false;   // DSSAT missing value, not a range violation
@@ -285,6 +308,11 @@ bool CulTableModel::setData(const QModelIndex &index, const QVariant &value, int
                 bool ok;
                 double v = str.toDouble(&ok);
                 if (!ok) return false;
+                const QString err = rangeError(p, v);
+                if (!err.isEmpty()) {
+                    emit valueRejected(err);
+                    return false;
+                }
                 row.params[p] = std::optional<double>(v);
                 row.paramStrs[p] = str; // Preserve string so decimal precision is kept on write
             }

@@ -57,6 +57,12 @@ public:
     void setCalibrationTypeForParam(const QString &paramName, const QString &type);
     QMap<QString, QString> calibrationTypes() const { return m_calibTypes; }
 
+    // Values a parameter may take: MINIMA–MAXIMA widened by 10% of that span on
+    // each side. False when the file has no usable MINIMA/MAXIMA for it.
+    bool allowedRange(int paramIdx, double *lo, double *hi) const;
+    // Why `value` may not be entered for this parameter; empty if it may
+    QString rangeError(int paramIdx, double value) const;
+
     // Tint the row with this VAR# (strength 1 = full, 0 = none); empty varNum clears
     void setHighlight(const QString &varNum, qreal strength);
 
@@ -74,6 +80,7 @@ public:
 
 signals:
     void dataModified();
+    void valueRejected(const QString &reason);
     void calibrationTypeChanged(const QString &paramName, const QString &type);
 
 private:

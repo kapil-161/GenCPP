@@ -2,6 +2,8 @@
 #include "CalibHeaderView.h"
 #include <QHeaderView>
 #include <QScrollBar>
+#include <QSettings>
+#include <QTimer>
 
 FrozenTableView::FrozenTableView(int frozenColumns, bool calibrationBand, QWidget *parent)
     : QTableView(parent)
@@ -78,6 +80,54 @@ void FrozenTableView::setColumnDelegate(int column, QAbstractItemDelegate *deleg
 {
     setItemDelegateForColumn(column, delegate);
     m_frozen->setItemDelegateForColumn(column, delegate);
+}
+
+void FrozenTableView::enableUserColumnWidths(const QString &tableName)
+{
+    m_widthTable = tableName;
+    horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
+    m_frozen->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
+
+    // The frozen columns' edges are on the overlay: pass its drags to our columns
+    connect(m_frozen->horizontalHeader(), &QHeaderView::sectionResized, this,
+            [this](int col, int, int size) {
+                if (col < m_count && columnWidth(col) != size) setColumnWidth(col, size);
+            });
+    // Remember what the user sets (not our own fitting)
+    connect(horizontalHeader(), &QHeaderView::sectionResized, this,
+            [this](int col, int, int size) {
+                if (!m_applyingWidths && !widthKey(col).isEmpty())
+                    QSettings("DSSAT", "GeneticsEditor").setValue(widthKey(col), size);
+            });
+    if (model()) {
+        // After the view has laid out the new rows
+        connect(model(), &QAbstractItemModel::modelReset, this,
+                [this]() { QTimer::singleShot(0, this, &FrozenTableView::applyColumnWidths); });
+        QTimer::singleShot(0, this, &FrozenTableView::applyColumnWidths);
+    }
+}
+
+QString FrozenTableView::widthKey(int column) const
+{
+    if (m_widthTable.isEmpty() || !model()) return {};
+    const QString name = model()->headerData(column, Qt::Horizontal, Qt::DisplayRole).toString();
+    if (name.isEmpty()) return {};
+    return QString("ColumnWidths/%1/%2/%3").arg(m_widthTable, m_widthScope.isEmpty() ? "_" : m_widthScope, name);
+}
+
+void FrozenTableView::applyColumnWidths()
+{
+    if (!model()) return;
+    m_applyingWidths = true;
+    resizeColumnsToContents();
+    QSettings s("DSSAT", "GeneticsEditor");
+    for (int c = 0; c < model()->columnCount(); ++c) {
+        const QString key = widthKey(c);
+        const int w = key.isEmpty() ? 0 : s.value(key, 0).toInt();
+        if (w > 0) setColumnWidth(c, w);
+    }
+    m_applyingWidths = false;
+    syncColumns();
 }
 
 void FrozenTableView::syncColumns()

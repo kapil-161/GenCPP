@@ -1,6 +1,7 @@
 #include "CalibHeaderView.h"
 #include <QMouseEvent>
 #include <QPainter>
+#include <QStyle>
 
 CalibHeaderView::CalibHeaderView(QWidget *parent)
     : QHeaderView(Qt::Horizontal, parent)
@@ -56,7 +57,7 @@ void CalibHeaderView::paintSection(QPainter *painter, const QRect &rect, int log
 // Clicks in the band choose a type; they must not sort the table like a header click
 void CalibHeaderView::mousePressEvent(QMouseEvent *e)
 {
-    if (!inBand(e->position().toPoint())) return QHeaderView::mousePressEvent(e);
+    if (!bandClick(e->position().toPoint())) return QHeaderView::mousePressEvent(e);
     const int col = logicalIndexAt(e->position().toPoint());
     if (col >= 0 && model()) {
         const QString t = model()->headerData(col, Qt::Horizontal, CalibRole).toString();
@@ -68,12 +69,23 @@ void CalibHeaderView::mousePressEvent(QMouseEvent *e)
 
 void CalibHeaderView::mouseReleaseEvent(QMouseEvent *e)
 {
-    if (!inBand(e->position().toPoint())) return QHeaderView::mouseReleaseEvent(e);
+    if (!bandClick(e->position().toPoint())) return QHeaderView::mouseReleaseEvent(e);
     e->accept();
 }
 
 void CalibHeaderView::mouseDoubleClickEvent(QMouseEvent *e)
 {
-    if (!inBand(e->position().toPoint())) return QHeaderView::mouseDoubleClickEvent(e);
+    if (!bandClick(e->position().toPoint())) return QHeaderView::mouseDoubleClickEvent(e);
     e->accept();
+}
+
+// In the band, but not on a column edge: edges still resize the column
+bool CalibHeaderView::bandClick(const QPoint &pos) const
+{
+    if (!inBand(pos)) return false;
+    const int col = logicalIndexAt(pos);
+    if (col < 0) return true;
+    const int left = sectionViewportPosition(col), right = left + sectionSize(col);
+    const int grip = style()->pixelMetric(QStyle::PM_HeaderGripMargin, nullptr, this) + 1;
+    return pos.x() - left > grip && right - pos.x() > grip;
 }

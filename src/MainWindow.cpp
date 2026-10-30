@@ -609,7 +609,7 @@ void MainWindow::setupCulTab(QWidget *tab)
         return list;
     }, this));
     m_culView->setAlternatingRowColors(true);
-    m_culView->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+    culView->enableUserColumnWidths("CUL");
     m_culView->horizontalHeader()->setStretchLastSection(false);
     m_culView->verticalHeader()->setDefaultSectionSize(22);
     m_culView->setSelectionBehavior(QAbstractItemView::SelectRows);
@@ -759,7 +759,7 @@ void MainWindow::setupEcoTab(QWidget *tab)
     m_ecoView = new FrozenTableView(2);   // ECO#, ECONAME
     m_ecoView->setModel(m_ecoProxy);
     m_ecoView->setAlternatingRowColors(true);
-    m_ecoView->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+    static_cast<FrozenTableView *>(m_ecoView)->enableUserColumnWidths("ECO");
     m_ecoView->verticalHeader()->setDefaultSectionSize(22);
     m_ecoView->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_ecoView->setSortingEnabled(true);
@@ -985,6 +985,9 @@ void MainWindow::loadCrop(const QString &cropCode)
 {
     if (!m_crops.contains(cropCode)) return;
     if (m_culNewRowFade) m_culNewRowFade->stop();
+    // Remembered column widths are per crop
+    static_cast<FrozenTableView *>(m_culView)->setColumnWidthScope(cropCode);
+    static_cast<FrozenTableView *>(m_ecoView)->setColumnWidthScope(cropCode);
     const CropInfo &info = m_crops[cropCode];
     m_currentCropCode = cropCode;
     m_currentCulPath  = info.culFile;

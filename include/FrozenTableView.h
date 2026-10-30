@@ -19,6 +19,12 @@ public:
     // Like setItemDelegateForColumn, but also for the frozen view's copy of the column
     void setColumnDelegate(int column, QAbstractItemDelegate *delegate);
 
+    // Let the user drag column edges (frozen columns included), like a spreadsheet.
+    // Widths the user sets are remembered per scope (e.g. crop) and column name,
+    // also across launches; other columns fit their contents after each reload.
+    void enableUserColumnWidths(const QString &tableName);
+    void setColumnWidthScope(const QString &scope) { m_widthScope = scope; }
+
 signals:
     // A click in the calibration band of a parameter column (either header)
     void calibrationClicked(int column, const QPoint &globalPos);
@@ -33,9 +39,14 @@ private:
     void syncColumns();          // hide all but the frozen columns, match widths
     void updateFrozenGeometry();
     int  frozenWidth() const;
+    void applyColumnWidths();
+    QString widthKey(int column) const;
 
     QTableView *m_frozen;
     int         m_count;
+    QString     m_widthTable;
+    QString     m_widthScope;
+    bool        m_applyingWidths = false;
 };
 
 #endif // FROZENTABLEVIEW_H

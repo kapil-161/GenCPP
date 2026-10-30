@@ -29,6 +29,7 @@ protected:
 private:
     int  bandHeight() const;
     bool inBand(const QPoint &pos) const { return pos.y() >= height() - bandHeight(); }
+    bool bandClick(const QPoint &pos) const;
 };
 
 #endif // CALIBHEADERVIEW_H

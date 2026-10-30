@@ -54,6 +54,8 @@ public:
 
     // Format one CUL data row as a fixed-width string using pre-inferred formats.
     static QString formatRow(const CulRow &row, const QVector<ParamFormat> &formats, int numParams);
+    // One parameter's field exactly as formatRow writes it (leading space included)
+    static QString formatValue(const CulRow &row, int i, const QVector<ParamFormat> &formats);
 
     // Format one numeric parameter given its specific format rules.
     static QString formatParam(double value, const ParamFormat &fmt);

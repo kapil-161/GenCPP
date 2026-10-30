@@ -186,27 +186,31 @@ QString EcoParser::formatRow(const EcoRow &row, const EcoLayout &layout)
     // Only the columns this row has: header names beyond the data are optional
     // trailing parameters, and adding -99 for them would change what DSSAT reads.
     const int n = qMin(int(row.vals.size()), int(layout.ends.size()));
-    for (int c = 0; c < n; ++c) {
-        const int w = layout.width(c);
-        QString v = row.vals[c].trimmed();
-        if (v.isEmpty()) v = layout.numeric[c] ? "-99" : ".";
-        if (v.size() > w - 1) {
-            bool ok;
-            const double d = v.toDouble(&ok);
-            if (ok) {
-                // Too wide: let CulParser::formatParam shrink it (drop leading zero/decimals)
-                ParamFormat f;
-                f.width = w - 1;
-                f.decimals = decimalsOf(v);
-                f.trailingDot = v.endsWith('.');
-                line += CulParser::formatParam(d, f);
-                continue;
-            }
-            v = v.left(w - 1);
-        }
-        line += v.rightJustified(w, ' ');                     // right-aligned, >= 1 leading space
-    }
+    for (int c = 0; c < n; ++c)
+        line += formatValue(row, c, layout);
     return line;
+}
+
+QString EcoParser::formatValue(const EcoRow &row, int c, const EcoLayout &layout)
+{
+    if (c < 0 || c >= row.vals.size() || c >= layout.ends.size()) return QString();
+    const int w = layout.width(c);
+    QString v = row.vals[c].trimmed();
+    if (v.isEmpty()) v = layout.numeric[c] ? "-99" : ".";
+    if (v.size() > w - 1) {
+        bool ok;
+        const double d = v.toDouble(&ok);
+        if (ok) {
+            // Too wide: let CulParser::formatParam shrink it (drop leading zero/decimals)
+            ParamFormat f;
+            f.width = w - 1;
+            f.decimals = decimalsOf(v);
+            f.trailingDot = v.endsWith('.');
+            return CulParser::formatParam(d, f);
+        }
+        v = v.left(w - 1);
+    }
+    return v.rightJustified(w, ' ');                          // right-aligned, >= 1 leading space
 }
 
 bool EcoParser::write(const QString &filePath,

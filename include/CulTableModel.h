@@ -44,6 +44,8 @@ public:
     static const int COL_VRNAME  = 1;
     static const int COL_EXPNO   = 2;
     static const int COL_ECONUM  = 3;
+    // Display shows the file's text; sort on this so parameter columns sort as numbers
+    static const int SortRole = Qt::UserRole + 1;
     static const int COL_PARAM0  = 4;   // Parameters start at column 4
 
     // Set dynamic parameter names from the parsed CUL file
@@ -92,6 +94,9 @@ private:
     QStringList m_paramNames;
     QMap<QString, QString> m_tips;
     QMap<QString, QString> m_calibTypes;  // paramName -> "P" | "G" | "N"
+    const QVector<ParamFormat> &formats() const;
+    mutable QVector<ParamFormat> m_formats;
+    mutable bool m_formatsStale = true;
     QString m_highlightVar;
     qreal   m_highlightStrength = 0;
     void emitRowChanged(const QString &varNum);

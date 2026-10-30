@@ -58,12 +58,19 @@ QVariant EcoTableModel::data(const QModelIndex &index, int role) const
             int p = col - COL_PARAM0;
             if (p < 0 || p >= m_layout.names.size()) return QVariant();
             const QString v = p < row.vals.size() ? row.vals[p] : QString();
-            bool ok;
-            const double d = v.toDouble(&ok);
-            // Numbers display as numbers (so columns sort numerically); edit the text as stored
-            return (role == Qt::DisplayRole && ok) ? QVariant(d) : QVariant(v);
+            // Display exactly the text the file gets; edit the text as stored
+            if (role == Qt::DisplayRole)
+                return EcoParser::formatValue(row, p, m_layout).trimmed();
+            return v;
         }
         }
+    }
+
+    if (role == SortRole) {
+        const QVariant shown = data(index, Qt::DisplayRole);
+        bool ok;
+        const double d = shown.toString().toDouble(&ok);
+        return ok ? QVariant(d) : shown;   // numeric columns sort as numbers
     }
 
     if (role == Qt::BackgroundRole) {

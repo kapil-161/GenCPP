@@ -234,37 +234,38 @@ QString CulParser::formatRow(const CulRow &row, const QVector<ParamFormat> &form
     Q_UNUSED(numParams);
     const int actualParams = static_cast<int>(row.params.size());
 
-    for (int i = 0; i < actualParams; ++i) {
-        if (!row.params[i].has_value()) {
-            line += QString("-99").rightJustified((i < formats.size() ? formats[i].width : 5) + 1, ' ');
-            continue;
-        }
-        double v = row.params[i].value();
-        ParamFormat fmt = (i < formats.size()) ? formats[i] : ParamFormat();
-        // The value's own text (as read, typed or pasted) is written as is, right-aligned,
-        // when it still matches the value and fits the field: ".405" stays ".405".
-        if (i < row.paramStrs.size() && !row.paramStrs[i].trimmed().isEmpty()) {
-            const QString s = row.paramStrs[i].trimmed();
-            bool ok;
-            const double sv = s.toDouble(&ok);
-            if (ok && sv == v && s.size() <= fmt.width) {
-                line += " " + s.rightJustified(fmt.width, ' ');
-                continue;
-            }
-        }
-        // If this cell has its own stored string, derive decimal precision from it
-        // (e.g. GLUE-applied values like "39.80" should not be rounded to "40")
-        if (i < row.paramStrs.size() && !row.paramStrs[i].isEmpty()) {
-            QString s = row.paramStrs[i].trimmed();
-            int dotIdx = s.indexOf('.');
-            if (dotIdx >= 0) {
-                fmt.decimals = s.length() - dotIdx - 1;
-                fmt.trailingDot = (fmt.decimals == 0);   // "240." stays "240."
-            }
-        }
-        line += formatParam(v, fmt);
-    }
+    for (int i = 0; i < actualParams; ++i)
+        line += formatValue(row, i, formats);
     return line;
+}
+
+QString CulParser::formatValue(const CulRow &row, int i, const QVector<ParamFormat> &formats)
+{
+    if (i < 0 || i >= row.params.size()) return QString();
+    if (!row.params[i].has_value())
+        return QString("-99").rightJustified((i < formats.size() ? formats[i].width : 5) + 1, ' ');
+    double v = row.params[i].value();
+    ParamFormat fmt = (i < formats.size()) ? formats[i] : ParamFormat();
+    // The value's own text (as read, typed or pasted) is written as is, right-aligned,
+    // when it still matches the value and fits the field: ".405" stays ".405".
+    if (i < row.paramStrs.size() && !row.paramStrs[i].trimmed().isEmpty()) {
+        const QString s = row.paramStrs[i].trimmed();
+        bool ok;
+        const double sv = s.toDouble(&ok);
+        if (ok && sv == v && s.size() <= fmt.width)
+            return " " + s.rightJustified(fmt.width, ' ');
+    }
+    // If this cell has its own stored string, derive decimal precision from it
+    // (e.g. GLUE-applied values like "39.80" should not be rounded to "40")
+    if (i < row.paramStrs.size() && !row.paramStrs[i].isEmpty()) {
+        QString s = row.paramStrs[i].trimmed();
+        int dotIdx = s.indexOf('.');
+        if (dotIdx >= 0) {
+            fmt.decimals = s.length() - dotIdx - 1;
+            fmt.trailingDot = (fmt.decimals == 0);   // "240." stays "240."
+        }
+    }
+    return formatParam(v, fmt);
 }
 
 bool CulParser::write(const QString &filePath,

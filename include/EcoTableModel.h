@@ -38,6 +38,8 @@ public:
     static const int COL_ECONAME = 1;
     static const int COL_REFS    = 2;   // # of cultivars using this ECO
     static const int COL_PARAM0  = 3;
+    // Display shows the file's text; sort on this so numeric columns sort as numbers
+    static const int SortRole = Qt::UserRole + 1;
 
     QString columnName(int col) const;
     void setColumnTooltips(const QMap<QString, QString> &tips) { m_tips = tips; }

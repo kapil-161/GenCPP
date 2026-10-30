@@ -592,6 +592,7 @@ void MainWindow::setupCulTab(QWidget *tab)
     // Table view with sort/filter proxy
     m_culProxy = new CulSortProxy(this);
     m_culProxy->setSourceModel(m_culModel);
+    m_culProxy->setSortRole(CulTableModel::SortRole);
     m_culProxy->setFilterKeyColumn(-1);
     m_culProxy->setFilterCaseSensitivity(Qt::CaseInsensitive);
 
@@ -749,6 +750,7 @@ void MainWindow::setupEcoTab(QWidget *tab)
 
     m_ecoProxy = new EcoSortProxy(this);
     m_ecoProxy->setSourceModel(m_ecoModel);
+    m_ecoProxy->setSortRole(EcoTableModel::SortRole);
     m_ecoProxy->setFilterKeyColumn(-1);
     m_ecoProxy->setFilterCaseSensitivity(Qt::CaseInsensitive);
 

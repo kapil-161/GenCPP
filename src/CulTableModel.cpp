@@ -7,7 +7,28 @@
 CulTableModel::CulTableModel(QObject *parent)
     : QAbstractTableModel(parent)
     , m_paramNames(CUL_PARAM_NAMES)
-{}
+{
+    // Column formats are inferred from all rows, like the writer does, so any
+    // change to the data can change how other cells in that column are written.
+    auto stale = [this]() { m_formatsStale = true; };
+    connect(this, &QAbstractItemModel::modelReset,   this, stale);
+    connect(this, &QAbstractItemModel::rowsInserted, this, stale);
+    connect(this, &QAbstractItemModel::rowsRemoved,  this, stale);
+    connect(this, &QAbstractItemModel::dataChanged, this,
+            [this](const QModelIndex &, const QModelIndex &, const QList<int> &roles) {
+                if (roles.isEmpty() || roles.contains(Qt::DisplayRole) || roles.contains(Qt::EditRole))
+                    m_formatsStale = true;
+            });
+}
+
+const QVector<ParamFormat> &CulTableModel::formats() const
+{
+    if (m_formatsStale) {
+        m_formats = CulParser::inferFormats(m_rows, m_paramNames.size());
+        m_formatsStale = false;
+    }
+    return m_formats;
+}
 
 void CulTableModel::setParamNames(const QStringList &names)
 {
@@ -141,17 +162,22 @@ QVariant CulTableModel::data(const QModelIndex &index, int role) const
         case COL_EXPNO:  return row.expNo;
         case COL_ECONUM: return row.ecoNum;
         default: {
+            // Exactly the text the file gets ("12.50", "240.", ".115", "-99")
             int p = col - COL_PARAM0;
-            if (p >= 0 && p < row.params.size()) {
-                // Show empty if no value (std::nullopt), show value if set (including 0)
-                if (row.params[p].has_value())
-                    return row.params[p].value();
-                return QString();
-            }
+            if (p >= 0 && p < row.params.size())
+                return CulParser::formatValue(row, p, formats()).trimmed();
         }
         }
     }
-    
+
+    if (role == SortRole) {
+        int p = col - COL_PARAM0;
+        if (p < 0) return data(index, Qt::DisplayRole);
+        if (p < row.params.size() && row.params[p].has_value())
+            return row.params[p].value();
+        return -99.0;
+    }
+
     if (role == Qt::EditRole) {
         switch (col) {
         case COL_VARNUM: return row.varNum;

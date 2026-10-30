@@ -44,6 +44,8 @@ public:
                       const QStringList &footerLines = {});
     // Fixed-width row: every value right-aligned to its column's right edge.
     static QString formatRow(const EcoRow &row, const EcoLayout &layout);
+    // One column's field exactly as formatRow writes it (leading spaces included)
+    static QString formatValue(const EcoRow &row, int c, const EcoLayout &layout);
 };
 
 #endif // ECOPARSER_H

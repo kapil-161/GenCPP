@@ -756,7 +756,7 @@ void MainWindow::setupEcoTab(QWidget *tab)
     m_ecoProxy->setFilterKeyColumn(-1);
     m_ecoProxy->setFilterCaseSensitivity(Qt::CaseInsensitive);
 
-    m_ecoView = new FrozenTableView(3);   // ECO#, ECONAME, CUL refs
+    m_ecoView = new FrozenTableView(2);   // ECO#, ECONAME
     m_ecoView->setModel(m_ecoProxy);
     m_ecoView->setAlternatingRowColors(true);
     m_ecoView->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
@@ -764,8 +764,7 @@ void MainWindow::setupEcoTab(QWidget *tab)
     m_ecoView->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_ecoView->setSortingEnabled(true);
     vbox->addWidget(m_ecoView, 1);
-    vbox->addWidget(makeLegend({{Config::MINMAX_COLOR,  "MINIMA / MAXIMA"},
-                                {Config::WARNING_COLOR, "Ecotype not used by any cultivar"}}));
+    vbox->addWidget(makeLegend({{Config::MINMAX_COLOR,  "MINIMA / MAXIMA"}}));
 
     new QShortcut(QKeySequence::Copy, m_ecoView, this, &MainWindow::onEcoCopyRow);
 }
@@ -1047,7 +1046,6 @@ void MainWindow::loadFileType(const QString &fileType)
             }
             m_ecoModel->setColumnTooltips(CulParser::tooltipsFromHeader(m_ecoHeaderLines));
             m_ecoDirty = false;
-            refreshEcoCrossRef();
         }
 
         // Default to "Show Used" filter — silently, only if experiment files exist
@@ -1102,7 +1100,6 @@ void MainWindow::loadFileType(const QString &fileType)
         m_ecoModel->setRows(ecoRows, ecoLayout);
         m_ecoModel->setColumnTooltips(CulParser::tooltipsFromHeader(m_ecoHeaderLines));
         m_ecoDirty = false;
-        refreshEcoCrossRef();
         m_tabWidget->setCurrentIndex(1);
         setStatus(QString("Loaded ECO: %1 — %2 ecotypes").arg(QFileInfo(m_currentEcoPath).fileName()).arg(ecoRows.size()));
     } else if (fileType == "SPE") {
@@ -1134,17 +1131,6 @@ void MainWindow::updateWindowTitle()
         if (!file.isEmpty() && file != "—") title += " · " + file;
     }
     setWindowTitle(title);
-}
-
-void MainWindow::refreshEcoCrossRef()
-{
-    QMap<QString, int> refs;
-    const auto &culRows = m_culModel->rows();
-    for (const auto &r : culRows) {
-        if (!r.isMinMax)
-            refs[r.ecoNum]++;
-    }
-    m_ecoModel->setCulCrossRef(refs);
 }
 
 void MainWindow::buildSpeNavigator()
@@ -1472,7 +1458,6 @@ void MainWindow::onCulRefresh()
             }
         m_ecoModel->setColumnTooltips(CulParser::tooltipsFromHeader(m_ecoHeaderLines));
         m_ecoDirty = false;
-        refreshEcoCrossRef();
     }
 
     setStatus("Refreshed CUL and ECO from disk.");

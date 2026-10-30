@@ -93,7 +93,6 @@ private:
     void loadDssatConfig(const QString &dssatDir);
     void loadCrop(const QString &cropCode);
     void loadFileType(const QString &fileType);
-    void refreshEcoCrossRef();
     void buildSpeNavigator();
     void setStatus(const QString &msg, bool error = false);
     void selectNewCulRow(int sourceRow);

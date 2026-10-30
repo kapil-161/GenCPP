@@ -18,7 +18,6 @@ public:
     const EcoLayout &layout() const { return m_layout; }
 
     // Count how many CUL rows reference each ECO#
-    void setCulCrossRef(const QMap<QString, int> &refCounts) { m_refCounts = refCounts; }
 
     int rowCount(const QModelIndex &parent = QModelIndex()) const override;
     int columnCount(const QModelIndex &parent = QModelIndex()) const override;
@@ -36,8 +35,7 @@ public:
 
     static const int COL_ECONUM  = 0;
     static const int COL_ECONAME = 1;
-    static const int COL_REFS    = 2;   // # of cultivars using this ECO
-    static const int COL_PARAM0  = 3;
+    static const int COL_PARAM0  = 2;
     // Display shows the file's text; sort on this so numeric columns sort as numbers
     static const int SortRole = Qt::UserRole + 1;
 
@@ -52,7 +50,6 @@ private:
     QString generateUniqueEcoNum() const;
     QVector<EcoRow> m_rows;
     EcoLayout m_layout;
-    QMap<QString, int> m_refCounts;
     QMap<QString, QString> m_tips;
 };
 

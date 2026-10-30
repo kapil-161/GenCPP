@@ -27,7 +27,6 @@ QString EcoTableModel::columnName(int col) const
     switch (col) {
     case COL_ECONUM:  return "ECO#";
     case COL_ECONAME: return "ECONAME";
-    case COL_REFS:    return "CUL refs";
     default: {
         int p = col - COL_PARAM0;
         if (p >= 0 && p < m_layout.names.size())
@@ -47,13 +46,12 @@ QVariant EcoTableModel::data(const QModelIndex &index, int role) const
 
     // Numbers right-justified, as in the fixed-width file; IDs and names left
     if (role == Qt::TextAlignmentRole)
-        return QVariant::fromValue(Qt::AlignVCenter | (col >= COL_REFS ? Qt::AlignRight : Qt::AlignLeft));
+        return QVariant::fromValue(Qt::AlignVCenter | (col >= COL_PARAM0 ? Qt::AlignRight : Qt::AlignLeft));
 
     if (role == Qt::DisplayRole || role == Qt::EditRole) {
         switch (col) {
         case COL_ECONUM:  return row.ecoNum;
         case COL_ECONAME: return row.ecoName;
-        case COL_REFS:    return m_refCounts.value(row.ecoNum, 0);
         default: {
             int p = col - COL_PARAM0;
             if (p < 0 || p >= m_layout.names.size()) return QVariant();
@@ -75,8 +73,6 @@ QVariant EcoTableModel::data(const QModelIndex &index, int role) const
 
     if (role == Qt::BackgroundRole) {
         if (row.isMinMax)  return QBrush(Config::MINMAX_COLOR);
-        if (col == COL_REFS && m_refCounts.value(row.ecoNum, 0) == 0)
-            return QBrush(Config::WARNING_COLOR);
         return QVariant();
     }
 
@@ -85,8 +81,6 @@ QVariant EcoTableModel::data(const QModelIndex &index, int role) const
     }
 
     if (role == Qt::ToolTipRole) {
-        if (col == COL_REFS)
-            return QString("Number of cultivars referencing this ecotype");
         return Config::wrappedTip(m_tips.value(columnName(col), columnName(col)));
     }
 
@@ -106,8 +100,7 @@ Qt::ItemFlags EcoTableModel::flags(const QModelIndex &index) const
 {
     if (!index.isValid()) return Qt::NoItemFlags;
     Qt::ItemFlags f = Qt::ItemIsEnabled | Qt::ItemIsSelectable;
-    const bool fixedCol = index.column() == COL_REFS
-                       || (index.column() == COL_ECONAME && !m_layout.hasName);
+    const bool fixedCol = index.column() == COL_ECONAME && !m_layout.hasName;
     if (!m_rows[index.row()].isMinMax && !fixedCol)
         f |= Qt::ItemIsEditable;
     return f;
@@ -132,8 +125,6 @@ bool EcoTableModel::setData(const QModelIndex &index, const QVariant &value, int
         if (!m_layout.hasName) return false;
         row.ecoName = str.left(16);                          // A16
         break;
-    case COL_REFS:
-        return false;  // read-only computed column
     default: {
         int p = col - COL_PARAM0;
         if (p < 0 || p >= m_layout.names.size()) return false;

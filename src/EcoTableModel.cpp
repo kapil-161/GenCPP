@@ -162,7 +162,7 @@ void EcoTableModel::addRowWithFullData(const QString &ecoName, const QStringList
     r.ecoName = m_layout.hasName ? ecoName.left(16) : QString();
     r.vals    = vals;
     r.isMinMax = false;
-    m_rows.append(r);
+    appendAtEnd(r);
     endInsertRows();
     emit dataModified();
 }
@@ -193,7 +193,7 @@ void EcoTableModel::duplicateRow(int row)
     r.ecoNum   = CulParser::nextFreeId(r.ecoNum, ids);   // must stay 6 chars (A6)
     if (!r.ecoName.isEmpty())   // files without an ECONAME column keep it empty
         r.ecoName = CulParser::copyName(r.ecoName, names);
-    m_rows.append(r);
+    appendAtEnd(r);
     endInsertRows();
     emit dataModified();
 }
@@ -203,7 +203,21 @@ void EcoTableModel::deleteRow(int row)
     if (row < 0 || row >= m_rows.size()) return;
     if (m_rows[row].isMinMax) return;
     beginRemoveRows(QModelIndex(), row, row);
+    // The blank line(s) after the last row separate the rows from the comments below
+    if (row == m_rows.size() - 1 && row > 0)
+        m_rows[row - 1].trailingBlanks = qMax(m_rows[row - 1].trailingBlanks, m_rows[row].trailingBlanks);
     m_rows.removeAt(row);
     endRemoveRows();
     emit dataModified();
+}
+
+// A new row goes after the last row but before the blank line(s) that end the
+// list, so it doesn't end up stuck to the comment block below them.
+void EcoTableModel::appendAtEnd(EcoRow r)
+{
+    if (!m_rows.isEmpty()) {
+        r.trailingBlanks = m_rows.last().trailingBlanks;
+        m_rows.last().trailingBlanks = 0;
+    }
+    m_rows.append(r);
 }

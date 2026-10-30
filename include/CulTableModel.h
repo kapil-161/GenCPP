@@ -86,6 +86,7 @@ signals:
     void calibrationTypeChanged(const QString &paramName, const QString &type);
 
 private:
+    void appendAtEnd(CulRow r);
     bool isOutOfRange(int paramIdx, double value) const;
     QString generateUniqueVarNum() const;
     QVector<CulRow> m_rows;

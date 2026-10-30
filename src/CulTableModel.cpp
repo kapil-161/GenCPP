@@ -369,7 +369,7 @@ void CulTableModel::addRow(const QString &vrName)
     r.params  = QVector<std::optional<double>>(m_paramNames.size());
     r.paramStrs = QVector<QString>(m_paramNames.size(), "");
     r.isMinMax = false;
-    m_rows.append(r);
+    appendAtEnd(r);
     endInsertRows();
     emit dataModified();
 }
@@ -386,7 +386,7 @@ void CulTableModel::addRowWithData(const QString &vrName, const QString &expNo, 
     r.params  = QVector<std::optional<double>>(m_paramNames.size());
     r.paramStrs = QVector<QString>(m_paramNames.size(), "");
     r.isMinMax = false;
-    m_rows.append(r);
+    appendAtEnd(r);
     endInsertRows();
     emit dataModified();
 }
@@ -409,7 +409,7 @@ void CulTableModel::addRowWithFullData(const QString &vrName, const QString &exp
     }
     
     r.isMinMax = false;
-    m_rows.append(r);
+    appendAtEnd(r);
     endInsertRows();
     emit dataModified();
 }
@@ -439,7 +439,7 @@ void CulTableModel::duplicateRow(int row)
     for (const auto &x : m_rows) { ids << x.varNum; names << x.vrName; }
     r.varNum   = CulParser::nextFreeId(r.varNum, ids);   // must stay 6 chars (A6)
     r.vrName   = CulParser::copyName(r.vrName, names);
-    m_rows.append(r);
+    appendAtEnd(r);
     endInsertRows();
     emit dataModified();
 }
@@ -469,6 +469,9 @@ void CulTableModel::deleteRow(int row)
     if (row < 0 || row >= m_rows.size()) return;
     if (m_rows[row].isMinMax) return;  // Protect MINIMA/MAXIMA
     beginRemoveRows(QModelIndex(), row, row);
+    // The blank line(s) after the last row separate the rows from the comments below
+    if (row == m_rows.size() - 1 && row > 0)
+        m_rows[row - 1].trailingBlanks = qMax(m_rows[row - 1].trailingBlanks, m_rows[row].trailingBlanks);
     m_rows.removeAt(row);
     endRemoveRows();
     emit dataModified();
@@ -513,4 +516,15 @@ QVector<CulTableModel::Violation> CulTableModel::getViolations() const
     }
 
     return violations;
+}
+
+// A new row goes after the last row but before the blank line(s) that end the
+// list, so it doesn't end up stuck to the comment block below them.
+void CulTableModel::appendAtEnd(CulRow r)
+{
+    if (!m_rows.isEmpty()) {
+        r.trailingBlanks = m_rows.last().trailingBlanks;
+        m_rows.last().trailingBlanks = 0;
+    }
+    m_rows.append(r);
 }

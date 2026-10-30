@@ -48,6 +48,7 @@ signals:
     void dataModified();
 
 private:
+    void appendAtEnd(EcoRow r);
     QString generateUniqueEcoNum() const;
     QVector<EcoRow> m_rows;
     EcoLayout m_layout;

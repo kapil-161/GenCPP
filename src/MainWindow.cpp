@@ -614,6 +614,7 @@ void MainWindow::setupCulTab(QWidget *tab)
     m_culView->verticalHeader()->setDefaultSectionSize(22);
     m_culView->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_culView->setSortingEnabled(true);
+    m_culView->horizontalHeader()->setSortIndicator(-1, Qt::AscendingOrder);   // file order, new rows at the end
 
     // Right-click on column headers to change P/G/N calibration type
     m_culView->horizontalHeader()->setContextMenuPolicy(Qt::CustomContextMenu);
@@ -763,6 +764,7 @@ void MainWindow::setupEcoTab(QWidget *tab)
     m_ecoView->verticalHeader()->setDefaultSectionSize(22);
     m_ecoView->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_ecoView->setSortingEnabled(true);
+    m_ecoView->horizontalHeader()->setSortIndicator(-1, Qt::AscendingOrder);   // file order, new rows at the end
     vbox->addWidget(m_ecoView, 1);
     vbox->addWidget(makeLegend({{Config::MINMAX_COLOR,  "MINIMA / MAXIMA"}}));
 

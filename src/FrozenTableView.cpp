@@ -29,6 +29,9 @@ FrozenTableView::FrozenTableView(int frozenColumns, bool calibrationBand, QWidge
     m_frozen->setStyleSheet("QTableView { border: none; border-right: 2px solid #C9D6DF; }");
     m_frozen->horizontalHeader()->setSectionResizeMode(QHeaderView::Fixed);
     m_frozen->setSortingEnabled(true);          // header clicks sort the shared proxy
+    // A third click on a column name goes back to file order
+    horizontalHeader()->setSortIndicatorClearable(true);
+    m_frozen->horizontalHeader()->setSortIndicatorClearable(true);
     viewport()->stackUnder(m_frozen);
 
     setHorizontalScrollMode(ScrollPerPixel);

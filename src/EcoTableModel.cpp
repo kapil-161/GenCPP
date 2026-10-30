@@ -45,6 +45,10 @@ QVariant EcoTableModel::data(const QModelIndex &index, int role) const
     const EcoRow &row = m_rows[index.row()];
     int col = index.column();
 
+    // Numbers right-justified, as in the fixed-width file; IDs and names left
+    if (role == Qt::TextAlignmentRole)
+        return QVariant::fromValue(Qt::AlignVCenter | (col >= COL_REFS ? Qt::AlignRight : Qt::AlignLeft));
+
     if (role == Qt::DisplayRole || role == Qt::EditRole) {
         switch (col) {
         case COL_ECONUM:  return row.ecoNum;

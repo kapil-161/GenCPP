@@ -130,6 +130,10 @@ QVariant CulTableModel::data(const QModelIndex &index, int role) const
     const CulRow &row = m_rows[index.row()];
     int col = index.column();
 
+    // Numbers right-justified, as in the fixed-width file; IDs and names left
+    if (role == Qt::TextAlignmentRole)
+        return QVariant::fromValue(Qt::AlignVCenter | (col >= COL_PARAM0 ? Qt::AlignRight : Qt::AlignLeft));
+
     if (role == Qt::DisplayRole) {
         switch (col) {
         case COL_VARNUM: return row.varNum;
